@@ -7,7 +7,7 @@
   ],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/DIYAstro/ha-ascom-alpaca-bridge",
+  "documentation": "https://github.com/DIYAstro-Obs/ha-ascom-alpaca-bridge",
   "homeassistant": "2026.2.0",
   "integration_type": "device",
   "iot_class": "local_polling",
