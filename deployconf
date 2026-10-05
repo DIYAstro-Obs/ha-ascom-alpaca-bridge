@@ -1,3 +1,13 @@
+# Copy this file to deployconf.secrets (ignored by git) and fill in your values.
+
+# --- SSH (used by deploy.ps1 to copy the integration to /config/custom_components/ and restart Home Assistant) ---
+# SSH_URL: host or host:port of the SSH add-on (required)
+SSH_URL=YOUR_HA_IP:22
+SSH_USER=root
+# Optional. Stored in plain text, so only use it for test systems.
+# Leave empty to be asked for the password on every deploy.
+SSH_PW=
+
+# --- Home Assistant API (used by tests/stresstest.py, not by deploy.ps1) ---
 HA_URL=http://YOUR_HA_IP_ADDRESS:8123
 HA_TOKEN=YOUR_HA_TOKEN
-HA_USER=root

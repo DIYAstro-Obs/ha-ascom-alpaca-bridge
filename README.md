@@ -50,22 +50,23 @@ Home Assistant integration for monitoring and basic control of astronomical equi
 
 ## Development Deployment
 
-For developers looking to quickly deploy changes to their Home Assistant instance, a `deploy.ps1` script is included. 
+For developers looking to quickly deploy changes to their Home Assistant instance, a `deploy.ps1` script is included. It copies the integration to `/config/custom_components/` via SCP and restarts Home Assistant Core.
 
 **Setup:**
-1. Rename or copy the provided `deployconf` file to `deployconf.secrets`.
-2. Edit `deployconf.secrets` to include your Home Assistant URL and token:
-```env
-HA_URL=http://<YOUR_HA_IP>:8123
-HA_TOKEN=your_long_lived_token
-HA_USER=root  # Optional: defaults to 'root' if not specified
-```
-> [!TIP]
-> `deploy.ps1` intelligently extracts the bare IP address from `HA_URL` for SSH/SCP. Alternatively, you can specify `HA_IP` directly in the secrets file.
+1. Copy the provided `deployconf` file to `deployconf.secrets` (ignored by git).
+2. Set the SSH connection in `deployconf.secrets`:
 
+| Key | Purpose |
+|-----|---------|
+| `SSH_URL` | Host or `host:port` of the SSH add-on (required, port defaults to 22) |
+| `SSH_USER` | SSH user (default `root`) |
+| `SSH_PW` | Optional SSH password. Stored in plain text, so use it only for test systems. Leave empty to be asked on every deploy. |
+
+`HA_URL` and `HA_TOKEN` in the same file are used by the diagnostic script (see below), not by `deploy.ps1`.
 
 **Running the Deployment:**
 ```powershell
+.\deploy.ps1 -DryRun   # shows target, auth mode and steps without connecting
 .\deploy.ps1
 ```
 
