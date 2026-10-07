@@ -48,6 +48,8 @@ Home Assistant integration for monitoring and basic control of astronomical equi
 2. **Add Integration** -> **ASCOM Alpaca Bridge**.
 3. Enter the IP and Port (default: 11111) of the Alpaca server.
 
+The user interface is English only; the project does not provide translations.
+
 ## Development Deployment
 
 For developers looking to quickly deploy changes to their Home Assistant instance, a `deploy.ps1` script is included. It copies the integration to `/config/custom_components/` via SCP and restarts Home Assistant Core.
