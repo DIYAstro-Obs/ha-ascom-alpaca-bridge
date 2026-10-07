@@ -5,6 +5,9 @@ Home Assistant integration for monitoring and basic control of astronomical equi
 ![Alpaca Bridge Logo](custom_components/ascom_alpaca_bridge/brand/icon@2x.png)
 
 
+> [!WARNING]
+> **Under development.** This project is still under active development. Breaking changes are possible and even likely: configuration, entity names and IDs may change from one version to the next, and you may have to set things up again.
+
 > [!IMPORTANT]
 > This integration is primarily designed for **observatory monitoring**. While device control (Telescope, Camera, etc.) is implemented, these features should be considered **experimental**.
 > 
