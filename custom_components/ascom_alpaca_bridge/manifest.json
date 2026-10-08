@@ -8,6 +8,7 @@
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/DIYAstro-Obs/ha-ascom-alpaca-bridge",
+  "issue_tracker": "https://github.com/DIYAstro-Obs/ha-ascom-alpaca-bridge/issues",
   "homeassistant": "2026.2.0",
   "integration_type": "device",
   "iot_class": "local_polling",
@@ -15,5 +16,5 @@
     "aiohttp",
     "Pillow>=10.0.0"
   ],
-  "version": "0.9.0"
+  "version": "0.20.0"
 }

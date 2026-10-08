@@ -13,6 +13,8 @@ Home Assistant integration for monitoring and basic control of astronomical equi
 > 
 > **Disclaimer:** This software is provided **"as-is"**. It has only been tested using **ASCOM Simulators**. Use it with real hardware at your own risk.
 
+This project is not affiliated with or endorsed by the ASCOM Initiative.
+
 ## Core Functions
 
 - **Monitoring:** Read status and telemetry from Telescope, Camera, Dome, Focuser, Rotator, Cover, ObservingConditions, and SafetyMonitor.
