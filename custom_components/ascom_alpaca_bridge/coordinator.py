@@ -11,13 +11,12 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .identity import device_uid as _device_uid
 from .const import (
     DOMAIN, DEFAULT_SCAN_INTERVAL, MIN_SCAN_INTERVAL, MAX_CONCURRENT_REQUESTS, API_BASE, LOGGER,
     DEFAULT_MAX_SENSOR_AGE,
 )
 
-# UniqueId values of servers that do not really provide one
-GENERIC_UNIQUE_IDS = ("null", "none", "", "string")
 
 OBSERVINGCONDITIONS_PROPS = (
     "cloudcover", "dewpoint", "humidity", "pressure", "temperature", "windspeed", "starfwhm",
@@ -96,16 +95,8 @@ class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
         self.update_interval = timedelta(seconds=max(MIN_SCAN_INTERVAL, seconds))
 
     def device_uid(self, device: dict) -> str:
-        """The unique ID of a device: its Alpaca UniqueId, or one built from the server and the device.
-
-        The fallback is used when the server gives none, a generic one, or the same one for several devices
-        (their entities would collide).
-        """
-        uid = device.get("UniqueId")
-        if uid and str(uid).lower() not in GENERIC_UNIQUE_IDS:
-            if sum(1 for other in self.devices if other.get("UniqueId") == uid) == 1:
-                return uid
-        return f"{self.uid_host}_{device['DeviceType'].lower()}_{device['DeviceNumber']}"
+        """The unique ID of a device: its Alpaca UniqueID, or one built from the server and the device."""
+        return _device_uid(device, self.devices, self.uid_host)
 
     def get_client_transaction_id(self) -> int:
         """Get and increment the ClientTransactionID, resetting before reaching the 32-bit unsigned limit."""

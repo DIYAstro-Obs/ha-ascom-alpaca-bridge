@@ -14,8 +14,8 @@ const = importlib.import_module("ascom_alpaca_bridge.const")
 def _server():
     alpaca = FakeAlpaca()
     alpaca.configured_devices = [
-        {"DeviceType": "Camera", "DeviceNumber": 0, "DeviceName": "Cam", "UniqueId": "c0"},
-        {"DeviceType": "Dome", "DeviceNumber": 0, "DeviceName": "Roof", "UniqueId": "d0"},
+        {"DeviceType": "Camera", "DeviceNumber": 0, "DeviceName": "Cam", "UniqueID": "c0"},
+        {"DeviceType": "Dome", "DeviceNumber": 0, "DeviceName": "Roof", "UniqueID": "d0"},
     ]
     return alpaca
 
@@ -47,7 +47,7 @@ def test_manual_setup_creates_an_entry_with_the_selected_devices():
     assert result["type"] == "create_entry"
     assert result["title"] == "Test Server"
     assert result["data"][const.CONF_HOST] == "10.0.0.5"
-    assert result["data"][const.CONF_UID_HOST] == "10.0.0.5"
+    assert result["data"][const.CONF_UID_HOST] == "10.0.0.5_11111"  # host and port
     assert [d["DeviceType"] for d in result["data"][const.CONF_DEVICES]] == ["Dome"]
 
 

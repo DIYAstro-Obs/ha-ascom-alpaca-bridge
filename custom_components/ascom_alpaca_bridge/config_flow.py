@@ -18,7 +18,8 @@ CONF_SCAN_INTERVAL = "scan_interval"
 class AlpacaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Alpaca Bridge."""
 
-    VERSION = 1
+    # 2: the unique IDs are the Alpaca UniqueID (see identity.py, migration in __init__.py)
+    VERSION = 2
 
     @staticmethod
     def async_get_options_flow(config_entry):
@@ -152,7 +153,8 @@ class AlpacaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_HOST: self._host,
                     CONF_PORT: self._port,
                     CONF_DEVICES: selected_devices,
-                    CONF_UID_HOST: self._host,
+                    # the ID of a device without a UniqueID: host and port, two servers on one PC can differ
+                    CONF_UID_HOST: f"{self._host}_{self._port}",
                 }
             )
 

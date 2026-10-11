@@ -133,7 +133,7 @@ def device(devtype: str, number: int = 0, name: str | None = None) -> dict:
         "DeviceType": devtype,
         "DeviceNumber": number,
         "DeviceName": name or f"{devtype} {number}",
-        "UniqueId": f"uid-{devtype.lower()}-{number}",
+        "UniqueID": f"uid-{devtype.lower()}-{number}",
         "ServerName": "Test Server",
     }
 

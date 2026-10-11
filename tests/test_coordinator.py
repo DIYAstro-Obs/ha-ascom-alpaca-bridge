@@ -67,25 +67,39 @@ def test_a_new_command_replaces_the_follow_up_poll_and_unload_stops_it():
 
 
 def test_the_unique_id_is_the_alpaca_unique_id_when_it_is_usable():
-    camera = dict(device("Camera"), UniqueId="GUID-CAMERA")
-    dome = dict(device("Dome"), UniqueId="GUID-DOME")
+    camera = dict(device("Camera"), UniqueID="GUID-CAMERA")
+    dome = dict(device("Dome"), UniqueID="GUID-DOME")
     coordinator = make_coordinator(FakeAlpaca(), [camera, dome])
 
     assert coordinator.device_uid(camera) == "GUID-CAMERA"
     assert coordinator.device_uid(dome) == "GUID-DOME"
 
 
+def test_the_old_spelling_of_the_key_is_still_understood():
+    dome = {"DeviceType": "Dome", "DeviceNumber": 0, "UniqueId": "OLD-SPELLING"}
+    coordinator = make_coordinator(FakeAlpaca(), [dome])
+
+    assert coordinator.device_uid(dome) == "OLD-SPELLING"
+
+
+def test_the_fallback_id_contains_the_given_host_and_port():
+    dome = dict(device("Dome"), UniqueID="")
+    coordinator = make_coordinator(FakeAlpaca(), [dome], uid_host="10.0.0.5_32323")
+
+    assert coordinator.device_uid(dome) == "10.0.0.5_32323_dome_0"
+
+
 @pytest.mark.parametrize("unique_id", [None, "", "null", "None", "string"])
 def test_a_missing_or_generic_unique_id_falls_back_to_the_server_and_device(unique_id):
-    dome = dict(device("Dome", 2), UniqueId=unique_id)
+    dome = dict(device("Dome", 2), UniqueID=unique_id)
     coordinator = make_coordinator(FakeAlpaca(), [dome], uid_host="192.168.1.9")
 
     assert coordinator.device_uid(dome) == "192.168.1.9_dome_2"
 
 
 def test_devices_that_share_a_unique_id_get_different_entity_ids():
-    dome = dict(device("Dome"), UniqueId="SAME")
-    calibrator = dict(device("CoverCalibrator"), UniqueId="SAME")
+    dome = dict(device("Dome"), UniqueID="SAME")
+    calibrator = dict(device("CoverCalibrator"), UniqueID="SAME")
     coordinator = make_coordinator(FakeAlpaca(), [dome, calibrator])
     coordinator.data = {}
 

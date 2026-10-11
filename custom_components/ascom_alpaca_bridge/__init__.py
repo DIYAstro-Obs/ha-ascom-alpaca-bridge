@@ -2,9 +2,9 @@
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ServiceValidationError
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
@@ -16,6 +16,7 @@ from .const import (
     SERVICE_TELESCOPE_PULSEGUIDE,
 )
 from .coordinator import AlpacaDataUpdateCoordinator
+from .identity import device_uid, fallback_uid
 
 CONF_SCAN_INTERVAL = "scan_interval"
 
@@ -183,6 +184,49 @@ def _register_services(hass: HomeAssistant) -> None:
             vol.Required("num_y"): vol.All(vol.Coerce(int), vol.Range(min=1)),
         }),
     )
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Version 1 -> 2: devices with an Alpaca UniqueID move from the host based ID to it (see identity.py).
+
+    The entity IDs, names and history stay, only the internal unique IDs and the device identifiers change.
+    A device without a usable UniqueID keeps its host based ID. Everything comes from the data of the entry.
+    """
+    if entry.version == 1:
+        await _migrate_unique_ids(hass, entry)
+        hass.config_entries.async_update_entry(entry, version=2)
+    return True
+
+
+async def _migrate_unique_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    host = entry.data.get(CONF_UID_HOST) or entry.data[CONF_HOST]
+    devices = entry.data.get(CONF_DEVICES, [])
+    moves = {}  # old unique ID of a device -> new one
+    for device in devices:
+        old, new = fallback_uid(device, host), device_uid(device, devices, host)
+        if new != old:
+            moves[old] = new
+    if not moves:
+        return
+
+    longest_first = sorted(moves, key=len, reverse=True)
+
+    @callback
+    def _new_entity_unique_id(entity_entry):
+        unique_id = entity_entry.unique_id
+        for old in longest_first:
+            if unique_id.startswith(old + "_"):
+                return {"new_unique_id": moves[old] + unique_id[len(old):]}
+        return None
+
+    await er.async_migrate_entries(hass, entry.entry_id, _new_entity_unique_id)
+
+    registry = dr.async_get(hass)
+    for old, new in moves.items():
+        registered = registry.async_get_device(identifiers={(DOMAIN, old)})
+        if registered is not None and entry.entry_id in registered.config_entries:
+            registry.async_update_device(registered.id, new_identifiers={(DOMAIN, new)})
+    LOGGER.info("Migrated the unique IDs of %s device(s) of %s to their Alpaca UniqueID", len(moves), entry.title)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
