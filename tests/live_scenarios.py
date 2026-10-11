@@ -29,6 +29,16 @@ def attr(ha, entity_id, name):
     return None if state is None else state.get("attributes", {}).get(name)
 
 
+def find_position(entities, device_word):
+    """The sensor called "<device> Position": not the mechanical or the target position (their ids also end in
+    "position", and sort before it)."""
+    for entity_id in entities:
+        if (entity_id.startswith("sensor.") and device_word in entity_id and entity_id.endswith("_position")
+                and "mechanical" not in entity_id and "target" not in entity_id):
+            return entity_id
+    return None
+
+
 def number(ha, entity_id, default=-1e9):
     try:
         return float(ha.value(entity_id))
@@ -141,7 +151,7 @@ def positioner_scenarios(ha, report, area, target, apply, live, value, original,
 def focuser_scenarios(ha, entities, report):
     target = find(entities, "number", "focuser", "target_position")
     apply = find(entities, "button", "focuser", "move_to_target")
-    live = find(entities, "sensor", "focuser", "position")
+    live = find_position(entities, "focuser")
     if not all([target, apply, live]):
         return report.add("focuser", "entities present", False)
     print("Focuser:")
@@ -152,7 +162,7 @@ def focuser_scenarios(ha, entities, report):
 def rotator_scenarios(ha, entities, report):
     target = find(entities, "number", "rotator", "target_angle")
     apply = find(entities, "button", "rotator", "move_to_target_angle")
-    live = find(entities, "sensor", "rotator", "position")
+    live = find_position(entities, "rotator")
     relative = find(entities, "number", "rotator", "move_relative")
     relative_button = find(entities, "button", "rotator", "move_relative")
     if not all([target, apply, live, relative, relative_button]):
@@ -350,5 +360,8 @@ def run_all(ha, title, entities, report, server=None):
     camera_picture_scenario(ha, entities, report, server)
     readonly_scenarios(ha, entities, report)
     switch_scenarios(ha, entities, report)
+    from live_scenarios_controls import run_controls  # buttons, targets, selects and services of the devices
+
+    run_controls(ha, entities, report)
     service_scenarios(ha, entities, report)
     reload_scenario(ha, title, report)
