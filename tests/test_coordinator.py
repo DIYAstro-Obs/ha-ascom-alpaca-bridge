@@ -4,6 +4,7 @@ import logging
 
 import pytest
 
+from ha_stubs import UpdateFailed
 from helpers import FakeAlpaca, device, make_coordinator, run
 
 const = importlib.import_module("ascom_alpaca_bridge.const")
@@ -107,3 +108,30 @@ def test_devices_that_share_a_unique_id_get_different_entity_ids():
     first = cover_mod.AlpacaCover(coordinator, dome)
     second = cover_mod.AlpacaCover(coordinator, calibrator)
     assert first.unique_id != second.unique_id
+
+
+def test_a_value_that_is_not_a_number_is_no_value():
+    """Found live: a simulator answered NaN for the CCD temperature, Home Assistant refused the sensor state."""
+    alpaca = FakeAlpaca()
+    alpaca.set("camera", 0, "ccdtemperature", float("nan"))
+    alpaca.set("camera", 0, "heatsinktemperature", float("inf"))
+    alpaca.set("camera", 0, "coolerpower", 12.5)
+    coordinator = make_coordinator(alpaca, [device("Camera")])
+
+    run(coordinator.async_refresh())
+
+    data = coordinator.data["camera_0"]
+    assert "ccdtemperature" not in data and "heatsinktemperature" not in data
+    assert data["coolerpower"] == 12.5
+
+
+def test_a_failed_poll_says_what_failed_even_when_the_exception_has_no_text(monkeypatch):
+    coordinator = make_coordinator(FakeAlpaca(), [device("Dome")])
+
+    async def slow(*args, **kwargs):
+        raise TimeoutError()
+
+    monkeypatch.setattr(coordinator, "_fetch_prop_task", slow)
+
+    with pytest.raises(UpdateFailed, match="TimeoutError"):
+        run(coordinator._async_update_data())

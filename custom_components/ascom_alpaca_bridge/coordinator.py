@@ -1,13 +1,14 @@
 """DataUpdateCoordinator for Alpaca Bridge."""
 import asyncio
 import contextlib
+import math
 from datetime import timedelta
 from typing import Any, Callable, Dict
 
 import aiohttp
 
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -192,12 +193,14 @@ class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
                 ]:
                     tasks.append(self._fetch_prop_task(session, data, dev_key, dev_type, dev_num, p))
 
+        # Every request has its own 10 s timeout and a slow driver only costs its own values; this is the limit of
+        # the whole poll (up to ~100 requests, MAX_CONCURRENT_REQUESTS at a time).
         try:
-            async with asyncio.timeout(30):
+            async with asyncio.timeout(60):
                 if tasks:
                     await asyncio.gather(*tasks)
         except Exception as err:
-            raise UpdateFailed(f"Error communicating with API: {err or type(err).__name__}") from err
+            raise UpdateFailed(f"Error communicating with API: {str(err) or type(err).__name__}") from err
 
         # Every request failed at transport level and nothing answered: the server is not there. (Missing
         # properties are normal, a missing server is not: this makes the entities unavailable and, at startup,
@@ -402,7 +405,12 @@ class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
                         # ErrorNumber 0 means success.
                         # Some devices return ErrorNumber 1024 (Not Implemented) for optional properties.
                         if res.get("ErrorNumber") == 0:
-                            return res.get("Value")
+                            value = res.get("Value")
+                            # NaN / infinity (a camera that does not know its temperature, ...) is no value:
+                            # Home Assistant refuses such a state for a numeric sensor
+                            if isinstance(value, float) and not math.isfinite(value):
+                                return None
+                            return value
                     elif response.status in (400, 404):
                         # one warning per property until it answers again, not one per poll
                         level = LOGGER.debug if warned_key in self._warned else LOGGER.warning
@@ -471,7 +479,7 @@ class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
         dev_key = f"{dev_type.lower()}_{dev_num}"
         data = (self.data or {}).get(dev_key, {})
         if data.get("atpark"):
-            raise HomeAssistantError(f"{dev_type} {dev_num} is parked, unpark it first")
+            raise ServiceValidationError(f"{dev_type} {dev_num} is parked, unpark it first")
         tracking = data.get("tracking")
         if altaz and tracking:
             await self.send_command(dev_type, dev_num, "tracking", {"Tracking": "False"})
