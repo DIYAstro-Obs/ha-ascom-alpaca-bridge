@@ -1,10 +1,5 @@
 """Unique IDs of the devices: the Alpaca UniqueID when the server gives a usable one, otherwise one built from
-the server and the device.
-
-Before version 2 of the config entries the bridge read the key "UniqueId", but Alpaca (and every server) says
-"UniqueID", so every device had the host based ID. The migration in __init__.py moves the entities to the
-UniqueID; devices without a usable one keep the host based ID.
-"""
+the server and the device (`<host>_<type>_<number>`; new entries put host and port in it)."""
 
 # UniqueID values of servers that do not really provide one
 GENERIC_UNIQUE_IDS = ("null", "none", "", "string")

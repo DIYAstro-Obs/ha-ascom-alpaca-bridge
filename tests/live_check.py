@@ -8,6 +8,8 @@ Not a pytest module (the name does not start with test_): it talks to a real sys
                                                      tests/.live_check_state.json)
   py -3.14 tests/live_check.py entities              lists the entities of that entry
   py -3.14 tests/live_check.py run                   scenarios on the devices of that entry (needs live_scenarios.py)
+  py -3.14 tests/live_check.py retry                 reload the entry while you have stopped the server, then
+                                                     start it: the entry has to retry and load by itself
   py -3.14 tests/live_check.py delete                deletes the entry this script created
 
 The URL and token of Home Assistant come from deployconf.secrets (HA_URL, HA_TOKEN, not in git; another file
@@ -227,7 +229,9 @@ def create_entry(ha: Ha, hostport: str):
     new = [e for e in ha.entries() if e["entry_id"] not in before]
     if len(new) != 1:
         raise SystemExit(f"expected one new entry, found {len(new)}")
-    STATE_FILE.write_text(json.dumps({"entry_id": new[0]["entry_id"], "title": new[0]["title"]}), encoding="utf-8")
+    STATE_FILE.write_text(
+        json.dumps({"entry_id": new[0]["entry_id"], "title": new[0]["title"], "server": hostport}), encoding="utf-8"
+    )
     print(f"created entry {new[0]['title']!r} ({new[0]['entry_id'][:8]}), state {new[0]['state']}")
     return new[0]
 
@@ -241,6 +245,72 @@ def delete_entry(ha: Ha):
     print(f"deleted entry {state['title']!r}: HTTP {status}")
     if status == 200:
         STATE_FILE.unlink()
+
+
+def server_reachable(server: str) -> bool:
+    try:
+        with urllib.request.urlopen(f"http://{server}/management/apiversions", timeout=3) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+
+def entry_state(ha: Ha, entry_id: str):
+    for entry in ha.entries():
+        if entry["entry_id"] == entry_id:
+            return entry["state"]
+    return None
+
+
+def wait_for(predicate, timeout, step=2.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        value = predicate()
+        if value:
+            return value
+        time.sleep(step)
+    return None
+
+
+def run_retry(ha: Ha, server: str = None):
+    """The entry of `create` is reloaded while the server is down (you stop it) and has to retry and load by
+    itself when the server is back (you start it again). Prints what to do; waits up to 10 minutes per step."""
+    state = created_entry()
+    if not state:
+        print("create the entry first: live_check.py create HOST:PORT")
+        return 1
+    server = server or state.get("server")
+    entry_id, title = state["entry_id"], state["title"]
+    ha.allow_title(title)
+    report = Report()
+    before = ha.entry_entities(title)
+    print(f"entry {title!r} loaded with {len(before)} entities; server {server}", flush=True)
+
+    print(">>> STOP the Alpaca server now (waiting up to 10 minutes) ...", flush=True)
+    down = wait_for(lambda: not server_reachable(server), 600)
+    report.add("retry", "server is down", bool(down))
+    if not down:
+        return report.finish()
+
+    status, _ = ha.request("POST", f"/api/config/config_entries/entry/{entry_id}/reload")
+    retrying = wait_for(lambda: entry_state(ha, entry_id) == "setup_retry", 90, 2)
+    report.add("retry", "reload without a server gives setup_retry", bool(retrying), f"state {entry_state(ha, entry_id)}")
+
+    print(">>> START the Alpaca server again (waiting up to 10 minutes) ...", flush=True)
+    up = wait_for(lambda: server_reachable(server), 600)
+    report.add("retry", "server is back", bool(up))
+    if not up:
+        return report.finish()
+    came_back = time.time()
+    loaded = wait_for(lambda: entry_state(ha, entry_id) == "loaded", 600, 5)
+    report.add("retry", "the entry loads by itself", bool(loaded), f"after {time.time() - came_back:.0f} s")
+    time.sleep(15)
+    after = ha.entry_entities(title)
+    report.add("retry", "all entities are there again", after == before, f"{len(before)} -> {len(after)}")
+    values = [ha.value(e) for e in after]
+    unavailable = [e for e, v in zip(after, values) if v == "unavailable"]
+    report.add("retry", "no entity unavailable (except the tracking rate select)", len(unavailable) <= 1, str(unavailable[:3]))
+    return report.finish()
 
 
 # --- scenarios -----------------------------------------------------------------------------------------------
@@ -290,9 +360,11 @@ def camera_scenarios(ha: Ha, title: str, report: Report):
             status, image = ha.request("GET", f"/api/camera_proxy/{camera}", raw=True)
             images.append(image if status == 200 else b"")
             report.add("camera", "exposure finishes", bool(started and done))
+        # (that a new exposure gives a new picture is checked against the simulator in live_scenarios.py: a
+        # simulator may make the same picture twice)
         report.add(
-            "camera", "second exposure gives a new picture",
-            len(images) == 2 and images[0][:2] == b"\xff\xd8" and images[0] != images[1],
+            "camera", "the camera entity delivers JPEG pictures",
+            len(images) == 2 and all(i[:2] == b"\xff\xd8" for i in images),
             f"{[len(i) for i in images]} bytes",
         )
 
@@ -318,7 +390,7 @@ def run_scenarios_nina(ha: Ha):
     return report.finish()
 
 
-def run_simulators(ha: Ha):
+def run_simulators(ha: Ha, server: str = None):
     from live_scenarios import run_all  # needs Ha, Report and camera_scenarios of this module
 
     state = created_entry()
@@ -326,12 +398,13 @@ def run_simulators(ha: Ha):
         print("create the entry first: live_check.py create HOST:PORT")
         return 1
     title = state["title"]
+    server = server or state.get("server")
     ha.allow_title(title)
     entities = ha.entry_entities(title)
     report = Report()
     started = time.time()
     print(f"Scenarios on {title!r} ({len(entities)} entities):")
-    run_all(ha, title, entities, report)
+    run_all(ha, title, entities, report, server)
     errors = ha.log_errors(started)
     if errors is not None:
         report.add("log", "no errors or warnings of the bridge during the run", not errors, f"{len(errors)} line(s)")
@@ -340,7 +413,7 @@ def run_simulators(ha: Ha):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("what", choices=["baseline", "nina", "create", "entities", "run", "delete"])
+    parser.add_argument("what", choices=["baseline", "nina", "create", "entities", "run", "retry", "delete"])
     parser.add_argument("server", nargs="?", help="HOST:PORT of the Alpaca server (simulators)")
     parser.add_argument(
         "--secrets", type=pathlib.Path, default=ROOT / "deployconf.secrets",
@@ -353,7 +426,9 @@ def main():
     if args.what == "nina":
         return run_scenarios_nina(ha)
     if args.what == "run":
-        return run_simulators(ha)
+        return run_simulators(ha, args.server)
+    if args.what == "retry":
+        return run_retry(ha, args.server)
     if args.what == "create":
         create_entry(ha, args.server)
         return 0

@@ -3,7 +3,9 @@
 Every scenario restores what it changed. All calls go through Ha.service, which refuses entities that are not
 allowed.
 """
+import hashlib
 import time
+import urllib.request
 
 from live_check import DOMAIN, Report, camera_scenarios, created_entry, find
 
@@ -239,7 +241,63 @@ def reload_scenario(ha, title, report):
     report.add("config", "no entity unavailable after the reload", len(unavailable) <= 1, str(unavailable[:3]))
 
 
-def run_all(ha, title, entities, report):
+def sim_raw_md5(server):
+    """md5 of the image the simulator holds now (a plain GET of the ImageBytes, changes nothing)."""
+    url = f"http://{server}/api/v1/camera/0/imagearray?ClientID=99&ClientTransactionID=1"
+    request = urllib.request.Request(url, headers={"Accept": "application/imagebytes"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return hashlib.md5(response.read()).hexdigest()[:10]
+
+
+def camera_picture_scenario(ha, entities, report, server):
+    """The picture of the camera entity changes exactly when the simulator made a different one.
+
+    The simulator's picture depends on the focus: the focuser is moved between the exposures and put back.
+    """
+    camera = find(entities, "camera")
+    start = find(entities, "button", "start_exposure")
+    state = find(entities, "sensor", "camera_state")
+    ready = find(entities, "binary_sensor", "image_ready")
+    target = find(entities, "number", "focuser", "target_position")
+    apply = find(entities, "button", "focuser", "move_to_target")
+    live = find(entities, "sensor", "focuser", "position")
+    if not (all([camera, start, state, ready, target, apply, live]) and server):
+        return report.add("camera picture", "entities and server address present", False)
+    print("Camera picture against the simulator:")
+    original = number(ha, live)
+    rows = []
+
+    def focus(position):
+        ha.service("number", "set_value", entity_id=target, value=position)
+        ha.service("button", "press", entity_id=apply)
+        ha.wait(lambda: abs(number(ha, live) - position) <= 1, 90, 1)
+
+    def shot():
+        ha.service("button", "press", entity_id=start)
+        time.sleep(2)
+        ha.wait(lambda: ha.value(state) == "Idle" and ha.value(ready) == "on", 60, 1)
+        time.sleep(1)
+        status, image = ha.request("GET", f"/api/camera_proxy/{camera}", raw=True)
+        rows.append((sim_raw_md5(server), hashlib.md5(image).hexdigest()[:10]))
+
+    try:
+        shot()
+        focus(original + 6000)
+        shot()
+        focus(original)
+        shot()
+    finally:
+        focus(original)
+    sim = [r[0] for r in rows]
+    shown = [r[1] for r in rows]
+    report.add("camera picture", "the simulator made different pictures", len(set(sim)) > 1, str(sim))
+    report.add(
+        "camera picture", "the picture of the entity changes with the simulator's",
+        [s == sim[0] for s in sim] == [p == shown[0] for p in shown], f"simulator {sim} / entity {shown}",
+    )
+
+
+def run_all(ha, title, entities, report, server=None):
     dome_scenarios(ha, entities, report)
     calibrator_scenarios(ha, entities, report)
     telescope_scenarios(ha, entities, report)
@@ -248,6 +306,7 @@ def run_all(ha, title, entities, report):
     filterwheel_scenarios(ha, entities, report)
     print("Camera:")
     camera_scenarios(ha, title, report)
+    camera_picture_scenario(ha, entities, report, server)
     readonly_scenarios(ha, entities, report)
     service_scenarios(ha, entities, report)
     reload_scenario(ha, title, report)

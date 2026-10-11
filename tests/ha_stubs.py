@@ -197,26 +197,6 @@ class FakeDeviceRegistry:
             self.devices[device_id].identifiers = set(new_identifiers)
 
 
-class FakeEntityRegistry:
-    """The entity registry: entries with `entity_id`, `unique_id`, `config_entry_id`."""
-
-    def __init__(self):
-        self.entries = {}
-
-    def add(self, entity_id, unique_id, config_entry_id):
-        self.entries[entity_id] = types.SimpleNamespace(
-            entity_id=entity_id, unique_id=unique_id, config_entry_id=config_entry_id
-        )
-
-
-async def _async_migrate_entries(hass, config_entry_id, entry_callback):
-    for entry in list(hass.entity_registry.entries.values()):
-        if entry.config_entry_id == config_entry_id:
-            update = entry_callback(entry)
-            if update:
-                entry.unique_id = update["new_unique_id"]
-
-
 class FakeServices:
     def __init__(self):
         self.registered = {}
@@ -240,13 +220,6 @@ class FakeHass:
         self.started_tasks = []
         self.services = FakeServices()
         self.device_registry = FakeDeviceRegistry()
-        self.entity_registry = FakeEntityRegistry()
-        self.config_entries = types.SimpleNamespace(async_update_entry=self._update_entry)
-
-    @staticmethod
-    def _update_entry(entry, **changes):
-        for key, value in changes.items():
-            setattr(entry, key, value)
 
     def async_create_task(self, coro, *args, **kwargs):
         # the smart poll that follows a command is not run in the tests
@@ -299,9 +272,6 @@ def install() -> None:
     )
     helpers.device_registry = _mod(
         "homeassistant.helpers.device_registry", async_get=lambda hass: hass.device_registry
-    )
-    helpers.entity_registry = _mod(
-        "homeassistant.helpers.entity_registry", async_migrate_entries=_async_migrate_entries
     )
     helpers.entity = _mod("homeassistant.helpers.entity", DeviceInfo=dict)
     ha.helpers = helpers
