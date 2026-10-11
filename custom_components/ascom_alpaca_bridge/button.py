@@ -1,6 +1,4 @@
 """Button platform for Alpaca Bridge."""
-import asyncio
-
 from homeassistant.components.button import ButtonEntity
 
 from .const import DOMAIN, LOGGER
@@ -153,15 +151,10 @@ class AlpacaTelescopeSlewButton(AlpacaEntity, ButtonEntity):
                 return
             params[param_name] = str(value)
 
-        # Alt/Az slew requires tracking to be off
-        if self._command == "slewtoaltazasync" and data.get("tracking"):
-            LOGGER.debug("Telescope %s: disabling tracking for Alt/Az slew", self.dev_key)
-            await self.coordinator.send_command(
-                self.dev_type, self.dev_num, "tracking",
-                {"Tracking": "False"}
-            )
-            # Wait for telescope to process tracking change
-            await asyncio.sleep(1)
+        # parked: refuse; Alt/Az slew needs tracking off, an equatorial slew needs it on
+        await self.coordinator.prepare_slew(
+            self.dev_type, self.dev_num, altaz=self._command == "slewtoaltazasync"
+        )
 
         LOGGER.debug("Telescope %s: %s with %s", self.dev_key, self._command, params)
         success = await self.coordinator.send_command(
@@ -253,10 +246,12 @@ class AlpacaCameraStartExposureButton(AlpacaEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press."""
         duration = self.coordinator.get_target(self.dev_key, "target_exposure", 1.0)
-        LOGGER.debug("Camera %s: Start Exposure (Duration=%s)", self.dev_key, duration)
-        success = await self.coordinator.send_command(self.dev_type, self.dev_num, "startexposure", {"Duration": str(duration), "Light": "True"})
-        if success:
-            await self.coordinator.async_refresh()
+        light = self.coordinator.get_target(self.dev_key, "exposure_light", True)
+        LOGGER.debug("Camera %s: Start Exposure (Duration=%s, Light=%s)", self.dev_key, duration, light)
+        await self.coordinator.send_command(
+            self.dev_type, self.dev_num, "startexposure", {"Duration": str(duration), "Light": str(bool(light))}
+        )
+        await self.coordinator.async_refresh()
 
 
 class AlpacaRotatorMoveButton(AlpacaEntity, ButtonEntity):
@@ -452,13 +447,16 @@ class AlpacaCameraApplySettingsButton(AlpacaEntity, ButtonEntity):
             LOGGER.debug("Camera %s: no target settings to apply", self.dev_key)
             return
 
+        # in the order they are applied
         prop_cased = {
-            "binx": "BinX", "biny": "BinY", "gain": "Gain", "offset": "Offset",
+            "binx": "BinX", "biny": "BinY", "readoutmode": "ReadoutMode", "gain": "Gain", "offset": "Offset",
             "setccdtemperature": "SetCCDTemperature", "numx": "NumX", "numy": "NumY",
-            "startx": "StartX", "starty": "StartY", "readoutmode": "ReadoutMode"
+            "startx": "StartX", "starty": "StartY",
         }
 
-        for prop, value in list(target_dict.items()):
+        # A binning change can reset the subframe: binning first, the subframe last
+        order = {prop: index for index, prop in enumerate(prop_cased)}
+        for prop, value in sorted(target_dict.items(), key=lambda item: order.get(item[0], len(order))):
             formatted_val = f"{value:.2f}" if "temperature" in prop else str(int(value))
             p_case = prop_cased.get(prop, prop)
             LOGGER.debug("Camera %s: applying %s = %s", self.dev_key, p_case, formatted_val)

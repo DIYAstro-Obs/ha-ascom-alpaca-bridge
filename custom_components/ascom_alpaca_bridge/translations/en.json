@@ -17,6 +17,14 @@
                     "port": "Port"
                 }
             },
+            "reconfigure": {
+                "title": "Server Address",
+                "description": "Change the address of the ASCOM Alpaca server. The next step lets you select the devices again.",
+                "data": {
+                    "host": "IP Address",
+                    "port": "Port"
+                }
+            },
             "select_devices": {
                 "title": "Select Devices",
                 "description": "Select which devices you want to add to Home Assistant.",
@@ -27,12 +35,11 @@
         },
         "error": {
             "cannot_connect": "Failed to connect to the selected Alpaca server.",
-            "invalid_auth": "Invalid authentication.",
-            "no_devices_selected": "Please select at least one device.",
-            "unknown": "An unexpected error occurred."
+            "no_devices_selected": "Please select at least one device."
         },
         "abort": {
-            "already_configured": "This ASCOM Alpaca server is already configured."
+            "already_configured": "This ASCOM Alpaca server is already configured.",
+            "reconfigure_successful": "The server settings were updated."
         }
     },
     "options": {

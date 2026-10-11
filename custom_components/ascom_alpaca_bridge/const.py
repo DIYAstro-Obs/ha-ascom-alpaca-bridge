@@ -1,5 +1,4 @@
 """Constants for the ASCOM Alpaca Bridge integration."""
-from datetime import timedelta
 import logging
 
 LOGGER = logging.getLogger(__package__)
@@ -10,10 +9,12 @@ DOMAIN = "ascom_alpaca_bridge"
 DISCOVERY_PORT = 32227
 DEFAULT_PORT = 11111
 
-UPDATE_INTERVAL = timedelta(seconds=10)
 DEFAULT_SCAN_INTERVAL = 10
-MIN_SCAN_INTERVAL = 1
+MIN_SCAN_INTERVAL = 5  # a poll is up to ~100 requests (camera, telescope, ...): not faster than every 5 s
 MAX_SCAN_INTERVAL = 120
+
+# Requests of one poll that run at the same time (many ASCOM drivers are serial)
+MAX_CONCURRENT_REQUESTS = 8
 
 CONF_MAX_SENSOR_AGE = "max_sensor_age"
 DEFAULT_MAX_SENSOR_AGE = 600
@@ -40,6 +41,9 @@ MGMT_BASE = "management/v1"
 CONF_HOST = "host"
 CONF_PORT = "port"
 CONF_DEVICES = "devices"
+# The host the unique IDs of devices without an Alpaca UniqueId are built from. It stays the one of the first
+# setup when the server gets another IP address, so the entities keep their identity.
+CONF_UID_HOST = "uid_host"
 
 # Services
 SERVICE_SLEW_TO_COORDINATES = "slew_to_coordinates"

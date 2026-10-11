@@ -47,7 +47,7 @@ class AlpacaCover(AlpacaEntity, CoverEntity):
                 features |= CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE
             features |= CoverEntityFeature.STOP
         elif data.get("coverstate") != 0:  # 0 = NotPresent: a calibrator without cover
-            features |= CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE
+            features |= CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
         return features
 
     def _get_status(self):

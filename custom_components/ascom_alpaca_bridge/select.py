@@ -11,11 +11,17 @@ TRACKING_RATES = {
 }
 TRACKING_RATES_REVERSE = {v: k for k, v in TRACKING_RATES.items()}
 
-PIER_SIDE = {
-    0: "East",
-    1: "West",
-}
-PIER_SIDE_REVERSE = {v: k for k, v in PIER_SIDE.items()}
+def _unique_names(names):
+    """The filter names, made unique: the same name twice becomes "Empty" and "Empty (2)", so each one can be
+    selected."""
+    seen = {}
+    result = []
+    for name in (str(n) for n in names):
+        seen[name] = seen.get(name, 0) + 1
+        result.append(name if seen[name] == 1 else f"{name} ({seen[name]})")
+    return result
+
+
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -102,7 +108,7 @@ class AlpacaFilterWheelSelect(AlpacaEntity, SelectEntity):
         names = data.get("names", [])
         if not names:
             return [str(i) for i in range(10)]
-        return [str(n) for n in names]
+        return _unique_names(names)
 
     @property
     def current_option(self) -> str | None:

@@ -15,10 +15,11 @@ coordinator_mod = importlib.import_module("ascom_alpaca_bridge.coordinator")
 
 
 class _Response:
-    def __init__(self, status=200, payload=None, body=b""):
+    def __init__(self, status=200, payload=None, body=b"", server=None):
         self.status = status
         self._payload = payload
         self._body = body
+        self._server = server
 
     async def json(self):
         return self._payload
@@ -27,9 +28,16 @@ class _Response:
         return self._body
 
     async def __aenter__(self):
+        server = self._server
+        if server is not None:
+            server.inflight += 1
+            server.max_inflight = max(server.max_inflight, server.inflight)
+            await asyncio.sleep(0)  # a request takes time: the others can start meanwhile
         return self
 
     async def __aexit__(self, *exc):
+        if self._server is not None:
+            self._server.inflight -= 1
         return False
 
 
@@ -49,10 +57,23 @@ class FakeAlpaca:
         self.puts: list = []  # (devtype, number, command, data)
         self.put_errors: dict = {}  # command -> (ErrorNumber, ErrorMessage)
         self.image: bytes | None = None
+        self.statuses: dict = {}  # (devtype, number, prop, arg) -> HTTP status instead of the answer
+        self.inflight = 0
+        self.max_inflight = 0
+        self.server_name = "Test Server"
+        self.configured_devices: list = []  # answer of management/v1/configureddevices
 
     # --- test side ---
     def set(self, devtype, number, prop, value, arg=None):
         self.values[(devtype.lower(), number, prop.lower(), arg)] = value
+
+    def set_status(self, devtype, number, prop, status, arg=None):
+        """Answer the property with this HTTP status (None: back to the normal answer)."""
+        key = (devtype.lower(), number, prop.lower(), arg)
+        if status is None:
+            self.statuses.pop(key, None)
+        else:
+            self.statuses[key] = status
 
     def fail_once(self, devtype, number, prop, arg=None):
         self._fail_once.add((devtype.lower(), number, prop.lower(), arg))
@@ -72,6 +93,13 @@ class FakeAlpaca:
         return parts[2].lower(), int(parts[3]), parts[4].lower(), query
 
     def get(self, url, headers=None, timeout=None):
+        if "/management/" in url:
+            self.requests.append(("GET", "management", urlparse(url).path.rsplit("/", 1)[-1], None))
+            if not self.up:
+                raise ClientConnectorError("server is down")
+            if url.split("?")[0].endswith("/description"):
+                return _Response(200, {"Value": {"ServerName": self.server_name}, "ErrorNumber": 0}, server=self)
+            return _Response(200, {"Value": self.configured_devices, "ErrorNumber": 0}, server=self)
         devtype, number, prop, query = self._split(url)
         arg = query.get("id") or query.get("sensorname")
         self.requests.append(("GET", devtype, prop, arg))
@@ -81,11 +109,13 @@ class FakeAlpaca:
         if key in self._fail_once:
             self._fail_once.discard(key)
             raise ClientConnectorError("lost connection")
+        if key in self.statuses:
+            return _Response(self.statuses[key], {"ErrorNumber": 1, "ErrorMessage": "http"}, server=self)
         if prop == "imagearray":
-            return _Response(200, body=self.image or b"")
+            return _Response(200, body=self.image or b"", server=self)
         if key in self.values:
-            return _Response(200, {"Value": self.values[key], "ErrorNumber": 0, "ErrorMessage": ""})
-        return _Response(200, {"ErrorNumber": 1024, "ErrorMessage": "not implemented"})
+            return _Response(200, {"Value": self.values[key], "ErrorNumber": 0, "ErrorMessage": ""}, server=self)
+        return _Response(200, {"ErrorNumber": 1024, "ErrorMessage": "not implemented"}, server=self)
 
     def put(self, url, data=None, timeout=None):
         devtype, number, command, _ = self._split(url)

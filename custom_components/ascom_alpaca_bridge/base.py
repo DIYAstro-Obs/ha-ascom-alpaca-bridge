@@ -21,11 +21,9 @@ class AlpacaEntity(CoordinatorEntity):
         self.dev_num = device["DeviceNumber"]
         self.dev_key = f"{self.dev_type.lower()}_{self.dev_num}"
         
-        # ASCOM Alpaca UniqueId can sometimes be missing or generic
-        uid = device.get("UniqueId")
-        if not uid or uid.lower() in ("null", "none", "", "string"):
-             uid = f"{coordinator.host}_{self.dev_key}"
-             
+        # The Alpaca UniqueId can be missing, generic or shared by several devices: the coordinator decides
+        uid = coordinator.device_uid(device)
+
         self._device_uid = uid
         self._attr_unique_id = uid
         

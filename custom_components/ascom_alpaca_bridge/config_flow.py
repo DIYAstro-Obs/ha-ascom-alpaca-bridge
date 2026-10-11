@@ -1,4 +1,5 @@
 """Config flow for Alpaca Bridge."""
+import aiohttp
 import voluptuous as vol
 
 from homeassistant import config_entries
@@ -6,7 +7,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
-    DOMAIN, CONF_HOST, CONF_PORT, CONF_DEVICES, MGMT_BASE, LOGGER,
+    DOMAIN, CONF_HOST, CONF_PORT, CONF_DEVICES, CONF_UID_HOST, MGMT_BASE, LOGGER,
     DEFAULT_SCAN_INTERVAL, MIN_SCAN_INTERVAL, MAX_SCAN_INTERVAL,
     CONF_MAX_SENSOR_AGE, DEFAULT_MAX_SENSOR_AGE, MIN_MAX_SENSOR_AGE, MAX_MAX_SENSOR_AGE,
 )
@@ -31,6 +32,7 @@ class AlpacaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._port = None
         self._server_name = None
         self._available_devices = []
+        self._reconfigure_entry = None
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step."""
@@ -48,10 +50,10 @@ class AlpacaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             return result
                         errors["base"] = "cannot_connect"
                         break
-                
+
         # Discover servers
         self.discovered_servers = await async_discover_alpaca_servers()
-        
+
         # If no servers discovered, move to manual entry immediately
         if not self.discovered_servers:
             return await self.async_step_manual()
@@ -73,13 +75,13 @@ class AlpacaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
 
         if user_input is not None:
-            host = user_input[CONF_HOST]
+            host = user_input[CONF_HOST].strip()
             port = user_input[CONF_PORT]
-            
+
             result = await self._async_validate_and_fetch_devices(host, port)
             if result:
                 return result
-            
+
             errors["base"] = "cannot_connect"
 
         return self.async_show_form(
@@ -91,17 +93,37 @@ class AlpacaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_reconfigure(self, user_input=None):
+        """Change address and device list of an existing server (the IP address changed, a device was added)."""
+        self._reconfigure_entry = entry = self._get_reconfigure_entry()
+        errors = {}
+
+        if user_input is not None:
+            result = await self._async_validate_and_fetch_devices(user_input[CONF_HOST].strip(), user_input[CONF_PORT])
+            if result:
+                return result
+            errors["base"] = "cannot_connect"
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema({
+                vol.Required(CONF_HOST, default=entry.data[CONF_HOST]): str,
+                vol.Required(CONF_PORT, default=entry.data[CONF_PORT]): int,
+            }),
+            errors=errors,
+        )
+
     async def async_step_select_devices(self, user_input=None):
         """Handle device selection."""
         if user_input is not None:
             selected_keys = user_input.get("devices", [])
-            
+
             selected_devices = []
             for dev in self._available_devices:
                 key = f"{dev['DeviceType']}_{dev['DeviceNumber']}"
                 if key in selected_keys:
                     selected_devices.append(dev)
-            
+
             if not selected_devices:
                 return self.async_show_form(
                     step_id="select_devices",
@@ -109,12 +131,28 @@ class AlpacaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     errors={"base": "no_devices_selected"},
                 )
 
+            if self._reconfigure_entry is not None:
+                entry = self._reconfigure_entry
+                return self.async_update_reload_and_abort(
+                    entry,
+                    unique_id=f"{self._host}:{self._port}",
+                    title=self._server_name,
+                    data_updates={
+                        CONF_HOST: self._host,
+                        CONF_PORT: self._port,
+                        CONF_DEVICES: selected_devices,
+                        # the IDs of devices without an Alpaca UniqueId keep the host of the first setup
+                        CONF_UID_HOST: entry.data.get(CONF_UID_HOST, entry.data[CONF_HOST]),
+                    },
+                )
+
             return self.async_create_entry(
                 title=self._server_name,
                 data={
                     CONF_HOST: self._host,
                     CONF_PORT: self._port,
-                    CONF_DEVICES: selected_devices
+                    CONF_DEVICES: selected_devices,
+                    CONF_UID_HOST: self._host,
                 }
             )
 
@@ -130,21 +168,28 @@ class AlpacaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             key = f"{dev['DeviceType']}_{dev['DeviceNumber']}"
             label = f"{dev['DeviceType']} #{dev['DeviceNumber']}: {dev.get('DeviceName', 'Unknown')}"
             device_map[key] = label
-        
+
+        default = list(device_map.keys())
+        if self._reconfigure_entry is not None:
+            # a reconfigure starts from the devices that are set up
+            current = {f"{d['DeviceType']}_{d['DeviceNumber']}" for d in self._reconfigure_entry.data.get(CONF_DEVICES, [])}
+            default = [key for key in device_map if key in current]
+
         return vol.Schema({
-            vol.Required("devices", default=list(device_map.keys())): cv.multi_select(device_map)
+            vol.Required("devices", default=default): cv.multi_select(device_map)
         })
 
     async def _async_validate_and_fetch_devices(self, host: str, port: int):
         """Validate connection, fetch devices, and proceed to selection step."""
         session = async_get_clientsession(self.hass)
-        
+        timeout = aiohttp.ClientTimeout(total=5)
+
         # 1. Validate description endpoint
         desc_url = f"http://{host}:{port}/{MGMT_BASE}/description"
         server_name = "Alpaca Server"
         LOGGER.debug("Validating Alpaca server at %s", desc_url)
         try:
-            async with session.get(desc_url, timeout=5) as response:
+            async with session.get(desc_url, timeout=timeout) as response:
                 if response.status != 200:
                     LOGGER.error("Alpaca server returned status %s for %s", response.status, desc_url)
                     return None
@@ -158,16 +203,22 @@ class AlpacaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             LOGGER.error("Failed to connect to Alpaca server at %s: %s", desc_url, err)
             return None
 
-        # Make sure it's not already configured
-        await self.async_set_unique_id(f"{host}:{port}")
-        self._abort_if_unique_id_configured()
+        # Make sure it's not already configured (a reconfigure may keep or change its own address)
+        unique_id = f"{host}:{port}"
+        if self._reconfigure_entry is None:
+            await self.async_set_unique_id(unique_id)
+            self._abort_if_unique_id_configured()
+        else:
+            for other in self._async_current_entries():
+                if other.entry_id != self._reconfigure_entry.entry_id and other.unique_id == unique_id:
+                    return self.async_abort(reason="already_configured")
 
         # 2. Get active devices
         devices_url = f"http://{host}:{port}/{MGMT_BASE}/configureddevices"
         devices = []
         LOGGER.debug("Fetching configured devices from %s", devices_url)
         try:
-            async with session.get(devices_url, timeout=5) as response:
+            async with session.get(devices_url, timeout=timeout) as response:
                 if response.status == 200:
                     res = await response.json()
                     values = res.get("Value", [])
@@ -187,7 +238,7 @@ class AlpacaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._port = port
         self._server_name = server_name
         self._available_devices = devices
-        
+
         # Go to device selection step
         return await self.async_step_select_devices()
 
@@ -216,7 +267,7 @@ class AlpacaOptionsFlow(config_entries.OptionsFlow):
             data_schema=vol.Schema({
                 vol.Required(
                     CONF_SCAN_INTERVAL,
-                    default=current_interval,
+                    default=max(MIN_SCAN_INTERVAL, current_interval),
                 ): NumberSelector(NumberSelectorConfig(
                     min=MIN_SCAN_INTERVAL,
                     max=MAX_SCAN_INTERVAL,

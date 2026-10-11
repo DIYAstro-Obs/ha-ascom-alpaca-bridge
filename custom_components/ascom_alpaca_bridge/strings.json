@@ -1,17 +1,25 @@
 {
-    "title": "Alpaca Bridge",
+    "title": "ASCOM Alpaca Bridge",
     "config": {
         "step": {
             "user": {
-                "title": "Setup Alpaca Bridge",
-                "description": "Choose a discovered Alpaca server or select manual entry.",
+                "title": "Setup ASCOM Alpaca Bridge",
+                "description": "Choose a discovered ASCOM Alpaca server or select manual entry.",
                 "data": {
                     "host": "Discovered Servers"
                 }
             },
             "manual": {
                 "title": "Manual Setup",
-                "description": "Enter the IP address and port of your Alpaca server.",
+                "description": "Enter the IP address and port of your ASCOM Alpaca server.",
+                "data": {
+                    "host": "IP Address",
+                    "port": "Port"
+                }
+            },
+            "reconfigure": {
+                "title": "Server Address",
+                "description": "Change the address of the ASCOM Alpaca server. The next step lets you select the devices again.",
                 "data": {
                     "host": "IP Address",
                     "port": "Port"
@@ -26,13 +34,12 @@
             }
         },
         "error": {
-            "cannot_connect": "Failed to connect",
-            "invalid_auth": "Invalid authentication",
-            "no_devices_selected": "Please select at least one device",
-            "unknown": "Unexpected error"
+            "cannot_connect": "Failed to connect to the selected Alpaca server.",
+            "no_devices_selected": "Please select at least one device."
         },
         "abort": {
-            "already_configured": "Device is already configured"
+            "already_configured": "This ASCOM Alpaca server is already configured.",
+            "reconfigure_successful": "The server settings were updated."
         }
     },
     "options": {

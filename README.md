@@ -27,10 +27,16 @@ This project is not affiliated with or endorsed by the ASCOM Initiative.
     - Real-time updates for numeric limits (Gain, Offset, Exposure).
     - Dynamic option lists for Filter Wheels and Readout Modes.
 - **Custom Services (Experimental):**
-    - `camera_set_roi`: Set StartX, StartY, NumX, and NumY.
-    - `camera_start_exposure`: Trigger frames with manual duration.
-    - `pulseguide`: Service-based guiding support.
-- **Reliability:** Automatic `ClientTransactionID` reset at 2,000,000,000.
+    - `slew_to_coordinates`, `slew_to_alt_az`, `telescope_pulseguide`: Telescope.
+    - `rotator_move`, `rotator_sync`, `focuser_move`: Rotator and focuser.
+    - `dome_slew_az`, `dome_slew_alt`, `dome_sync_az`: Dome.
+    - `camera_start_exposure`, `camera_set_roi`, `camera_pulseguide`: Camera.
+    - With several devices of one type the service needs the optional `device_id`; services refuse a device that does not support the function.
+- **Reliability:**
+    - Home Assistant retries the setup when the Alpaca server does not answer at startup.
+    - A command that the device refuses is reported as an error in the Home Assistant UI.
+    - Entities are unavailable while the server does not answer; an error or unknown shutter / cover status is shown as unknown, not as open.
+    - Automatic `ClientTransactionID` reset at 2,000,000,000.
 
 ## Installation
 
@@ -52,6 +58,8 @@ This project is not affiliated with or endorsed by the ASCOM Initiative.
 1. In Home Assistant: **Settings** -> **Devices & Services**.
 2. **Add Integration** -> **ASCOM Alpaca Bridge**.
 3. Enter the IP and Port (default: 11111) of the Alpaca server.
+
+The address and the device list can be changed later with **Reconfigure** on the integration entry. The polling interval (at least 5 seconds) and the maximum sensor age are options of the entry.
 
 The user interface is English only; the project does not provide translations.
 

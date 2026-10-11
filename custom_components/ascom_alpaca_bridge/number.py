@@ -115,10 +115,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 "gain": {"name": "Gain", "icon": "mdi:brightness-5", "min": getattr(caps, "get", lambda k: 0)("gainmin") or 0, "max": getattr(caps, "get", lambda k: 100)("gainmax") or 100},
                 "offset": {"name": "Offset", "icon": "mdi:brightness-7", "min": getattr(caps, "get", lambda k: 0)("offsetmin") or 0, "max": getattr(caps, "get", lambda k: 100)("offsetmax") or 100},
                 "setccdtemperature": {"name": "Target CCD Temp", "icon": "mdi:thermometer-minus", "min": -50, "max": 50},
-                "numx": {"name": "Width (NumX)", "icon": "mdi:arrow-expand-horizontal", "min": 1, "max": 10000},
-                "numy": {"name": "Height (NumY)", "icon": "mdi:arrow-expand-vertical", "min": 1, "max": 10000},
-                "startx": {"name": "Start X", "icon": "mdi:arrow-right-bold", "min": 0, "max": 10000},
-                "starty": {"name": "Start Y", "icon": "mdi:arrow-down-bold", "min": 0, "max": 10000},
+                "numx": {"name": "Width (NumX)", "icon": "mdi:arrow-expand-horizontal", "min": 1, "max": caps.get("cameraxsize") or 10000},
+                "numy": {"name": "Height (NumY)", "icon": "mdi:arrow-expand-vertical", "min": 1, "max": caps.get("cameraysize") or 10000},
+                "startx": {"name": "Start X", "icon": "mdi:arrow-right-bold", "min": 0, "max": caps.get("cameraxsize") or 10000},
+                "starty": {"name": "Start Y", "icon": "mdi:arrow-down-bold", "min": 0, "max": caps.get("cameraysize") or 10000},
             }
 
             if not caps.get("cansetccdtemperature", False):
@@ -173,8 +173,8 @@ class AlpacaCalibratorNumber(AlpacaEntity, NumberEntity):
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
-        # Always make it available so the user can set brightness even if off
-        # It will turn on the calibrator if they move the slider
+        # Available while the device answers, also when the calibrator is off: the value is applied by the
+        # "Set Brightness" button, not by the slider
         return super().available
 
 class AlpacaSwitchNumber(AlpacaEntity, NumberEntity):
@@ -461,7 +461,7 @@ class AlpacaFocuserTargetNumber(AlpacaEntity, NumberEntity):
         """Return the maximum value."""
         data = self.coordinator.data.get(self.dev_key, {})
         caps = data.get("capabilities", {})
-        return caps.get("maxstep", 100000.0)
+        return caps.get("maxstep") or 100000.0
 
     @property
     def native_step(self):

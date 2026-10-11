@@ -47,8 +47,63 @@ class ConfigEntryNotReady(HomeAssistantError):
     pass
 
 
+class ServiceValidationError(HomeAssistantError):
+    pass
+
+
+class AbortFlow(Exception):
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
 class UpdateFailed(Exception):
     pass
+
+
+class ConfigFlow:
+    """What the bridge uses of the config flow base class; results are plain dicts."""
+
+    def __init_subclass__(cls, domain=None, **kwargs):
+        cls.domain = domain
+
+    hass = None
+    unique_id = None
+    configured_unique_ids: set = set()  # unique IDs of the entries that exist (set by the test)
+    current_entries: list = []  # the entries that exist (set by the test)
+    reconfigure_entry = None  # the entry that is reconfigured (set by the test)
+
+    def async_show_form(self, *, step_id, data_schema=None, errors=None, description_placeholders=None):
+        return {"type": "form", "step_id": step_id, "errors": errors or {}, "data_schema": data_schema}
+
+    def async_create_entry(self, *, title, data):
+        return {"type": "create_entry", "title": title, "data": data}
+
+    def async_abort(self, *, reason):
+        return {"type": "abort", "reason": reason}
+
+    async def async_set_unique_id(self, unique_id):
+        self.unique_id = unique_id
+
+    def _abort_if_unique_id_configured(self):
+        if self.unique_id in self.configured_unique_ids:
+            raise AbortFlow("already_configured")
+
+    def _async_current_entries(self):
+        return self.current_entries
+
+    def _get_reconfigure_entry(self):
+        return self.reconfigure_entry
+
+    def async_update_reload_and_abort(self, entry, *, unique_id=None, title=None, data_updates=None):
+        return {
+            "type": "abort", "reason": "reconfigure_successful", "entry": entry,
+            "unique_id": unique_id, "title": title, "data_updates": data_updates,
+        }
+
+
+class OptionsFlow:
+    config_entry = None
 
 
 class DataUpdateCoordinator:
@@ -106,6 +161,44 @@ class CoverEntityFeature(enum.IntFlag):
     STOP = 8
 
 
+class FakeTask:
+    def __init__(self):
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+
+    def done(self):
+        return self.cancelled
+
+
+class FakeDeviceRegistry:
+    """async_get(device_id) -> an object with `identifiers`."""
+
+    def __init__(self):
+        self.devices = {}
+
+    def add(self, device_id, identifiers):
+        self.devices[device_id] = types.SimpleNamespace(identifiers=set(identifiers))
+
+    def async_get(self, device_id):
+        return self.devices.get(device_id)
+
+
+class FakeServices:
+    def __init__(self):
+        self.registered = {}
+
+    def async_register(self, domain, name, handler, schema=None):
+        self.registered[(domain, name)] = (handler, schema)
+
+    def has_service(self, domain, name):
+        return (domain, name) in self.registered
+
+    def async_remove(self, domain, name):
+        self.registered.pop((domain, name), None)
+
+
 class FakeHass:
     """Home Assistant as far as the bridge uses it. `session` is what async_get_clientsession returns."""
 
@@ -113,11 +206,15 @@ class FakeHass:
         self.session = session
         self.data = {}
         self.started_tasks = []
+        self.services = FakeServices()
+        self.device_registry = FakeDeviceRegistry()
 
     def async_create_task(self, coro, *args, **kwargs):
         # the smart poll that follows a command is not run in the tests
-        self.started_tasks.append(coro)
         coro.close()
+        task = FakeTask()
+        self.started_tasks.append(task)
+        return task
 
     async def async_add_executor_job(self, func, *args):
         return func(*args)
@@ -133,8 +230,13 @@ def install() -> None:
 
     ha = _mod("homeassistant")
     _mod("homeassistant.core", HomeAssistant=object, ServiceCall=object, callback=lambda func: func)
-    _mod("homeassistant.config_entries", ConfigEntry=object)
-    _mod("homeassistant.exceptions", HomeAssistantError=HomeAssistantError, ConfigEntryNotReady=ConfigEntryNotReady)
+    _mod("homeassistant.config_entries", ConfigEntry=object, ConfigFlow=ConfigFlow, OptionsFlow=OptionsFlow)
+    _mod(
+        "homeassistant.exceptions",
+        HomeAssistantError=HomeAssistantError,
+        ConfigEntryNotReady=ConfigEntryNotReady,
+        ServiceValidationError=ServiceValidationError,
+    )
     _mod(
         "homeassistant.const",
         PERCENTAGE="%",
@@ -153,7 +255,12 @@ def install() -> None:
     helpers.aiohttp_client = _mod(
         "homeassistant.helpers.aiohttp_client", async_get_clientsession=lambda hass: hass.session
     )
-    helpers.config_validation = _mod("homeassistant.helpers.config_validation")
+    helpers.config_validation = _mod(
+        "homeassistant.helpers.config_validation", string=str, multi_select=lambda mapping: (lambda value: value)
+    )
+    helpers.device_registry = _mod(
+        "homeassistant.helpers.device_registry", async_get=lambda hass: hass.device_registry
+    )
     helpers.entity = _mod("homeassistant.helpers.entity", DeviceInfo=dict)
     ha.helpers = helpers
 

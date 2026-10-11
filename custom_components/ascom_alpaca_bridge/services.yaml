@@ -1,7 +1,15 @@
 slew_to_coordinates:
   name: Slew to Coordinates (RA/Dec)
-  description: Slew the telescope to the given equatorial coordinates.
+  description: Slew the telescope to the given equatorial coordinates. Tracking is switched on when it is off.
   fields:
+    device_id:
+      name: Device
+      description: The device to use. Not needed when there is only one telescope.
+      required: false
+      selector:
+        device:
+          integration: ascom_alpaca_bridge
+          model: Telescope
     ra:
       name: Right Ascension
       description: Right Ascension in hours (0-24)
@@ -27,8 +35,16 @@ slew_to_coordinates:
 
 slew_to_alt_az:
   name: Slew to Alt/Az
-  description: Slew the telescope to the given horizontal coordinates.
+  description: Slew the telescope to the given horizontal coordinates. Tracking is switched off first.
   fields:
+    device_id:
+      name: Device
+      description: The device to use. Not needed when there is only one telescope.
+      required: false
+      selector:
+        device:
+          integration: ascom_alpaca_bridge
+          model: Telescope
     alt:
       name: Altitude
       description: Altitude in degrees (0-90)
@@ -52,10 +68,52 @@ slew_to_alt_az:
           step: 0.01
           unit_of_measurement: "°"
 
+telescope_pulseguide:
+  name: Telescope Pulse Guide
+  description: Send a pulse guide command to the telescope.
+  fields:
+    device_id:
+      name: Device
+      description: The device to use. Not needed when there is only one telescope.
+      required: false
+      selector:
+        device:
+          integration: ascom_alpaca_bridge
+          model: Telescope
+    direction:
+      name: Direction
+      description: Guide direction (0=North, 1=South, 2=East, 3=West)
+      required: true
+      example: 0
+      selector:
+        number:
+          min: 0
+          max: 3
+          step: 1
+    duration:
+      name: Duration
+      description: Pulse duration in milliseconds
+      required: true
+      example: 1000
+      selector:
+        number:
+          min: 1
+          max: 30000
+          step: 1
+          unit_of_measurement: "ms"
+
 rotator_move:
   name: Rotator Move Relative
   description: Move the rotator by the given relative amount.
   fields:
+    device_id:
+      name: Device
+      description: The device to use. Not needed when there is only one rotator.
+      required: false
+      selector:
+        device:
+          integration: ascom_alpaca_bridge
+          model: Rotator
     position:
       name: Position
       description: Angle to move in degrees
@@ -70,6 +128,14 @@ rotator_sync:
   name: Rotator Sync
   description: Sync the rotator to the given angle without moving it.
   fields:
+    device_id:
+      name: Device
+      description: The device to use. Not needed when there is only one rotator.
+      required: false
+      selector:
+        device:
+          integration: ascom_alpaca_bridge
+          model: Rotator
     position:
       name: Position
       description: Angle to sync to in degrees (0-360)
@@ -86,6 +152,14 @@ focuser_move:
   name: Focuser Move
   description: Move the focuser to the given absolute position, or by the given relative amount (depending on the focuser capabilities).
   fields:
+    device_id:
+      name: Device
+      description: The device to use. Not needed when there is only one focuser.
+      required: false
+      selector:
+        device:
+          integration: ascom_alpaca_bridge
+          model: Focuser
     position:
       name: Position
       description: Steps to move (int)
@@ -100,6 +174,14 @@ dome_slew_az:
   name: Dome Slew to Azimuth
   description: Slew the dome to the given azimuth (0-360).
   fields:
+    device_id:
+      name: Device
+      description: The device to use. Not needed when there is only one dome.
+      required: false
+      selector:
+        device:
+          integration: ascom_alpaca_bridge
+          model: Dome
     azimuth:
       name: Azimuth
       description: Target Azimuth in degrees
@@ -116,6 +198,14 @@ dome_slew_alt:
   name: Dome Slew to Altitude
   description: Slew the dome to the given altitude (0-90).
   fields:
+    device_id:
+      name: Device
+      description: The device to use. Not needed when there is only one dome.
+      required: false
+      selector:
+        device:
+          integration: ascom_alpaca_bridge
+          model: Dome
     altitude:
       name: Altitude
       description: Target Altitude in degrees
@@ -132,6 +222,14 @@ dome_sync_az:
   name: Dome Sync Azimuth
   description: Sync the dome's reported azimuth to a new value without moving.
   fields:
+    device_id:
+      name: Device
+      description: The device to use. Not needed when there is only one dome.
+      required: false
+      selector:
+        device:
+          integration: ascom_alpaca_bridge
+          model: Dome
     azimuth:
       name: Azimuth
       description: Sync Azimuth in degrees
@@ -146,8 +244,16 @@ dome_sync_az:
 
 camera_start_exposure:
   name: Camera Start Exposure
-  description: Start an exposure on the primary camera.
+  description: Start an exposure on the camera.
   fields:
+    device_id:
+      name: Device
+      description: The device to use. Not needed when there is only one camera.
+      required: false
+      selector:
+        device:
+          integration: ascom_alpaca_bridge
+          model: Camera
     duration:
       name: Duration
       description: Exposure duration in seconds
@@ -172,6 +278,14 @@ camera_pulseguide:
   name: Camera Pulse Guide
   description: Send a pulse guide command to the camera's ST-4 port.
   fields:
+    device_id:
+      name: Device
+      description: The device to use. Not needed when there is only one camera.
+      required: false
+      selector:
+        device:
+          integration: ascom_alpaca_bridge
+          model: Camera
     direction:
       name: Direction
       description: Guide direction (0=North, 1=South, 2=East, 3=West)
@@ -195,46 +309,58 @@ camera_pulseguide:
           unit_of_measurement: "ms"
 
 camera_set_roi:
-  name: "Camera Set ROI"
-  description: "Sets the Region of Interest (startX, startY, numX, numY) atomically."
+  name: Camera Set ROI
+  description: Sets the Region of Interest (StartX, StartY, NumX, NumY). The four values are sent one after the other.
   fields:
+    device_id:
+      name: Device
+      description: The device to use. Not needed when there is only one camera.
+      required: false
+      selector:
+        device:
+          integration: ascom_alpaca_bridge
+          model: Camera
     start_x:
-      name: "Start X"
-      description: "X offset of the subframe."
+      name: Start X
+      description: X offset of the subframe.
       required: true
       example: 0
       selector:
         number:
           min: 0
-          max: 10000
+          max: 100000
           step: 1
+          mode: box
     start_y:
-      name: "Start Y"
-      description: "Y offset of the subframe."
+      name: Start Y
+      description: Y offset of the subframe.
       required: true
       example: 0
       selector:
         number:
           min: 0
-          max: 10000
+          max: 100000
           step: 1
+          mode: box
     num_x:
-      name: "Width"
-      description: "Width of the subframe."
+      name: Width
+      description: Width of the subframe.
       required: true
       example: 1000
       selector:
         number:
           min: 1
-          max: 10000
+          max: 100000
           step: 1
+          mode: box
     num_y:
-      name: "Height"
-      description: "Height of the subframe."
+      name: Height
+      description: Height of the subframe.
       required: true
       example: 1000
       selector:
         number:
           min: 1
-          max: 10000
+          max: 100000
           step: 1
+          mode: box

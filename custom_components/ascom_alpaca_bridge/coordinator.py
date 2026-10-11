@@ -1,5 +1,6 @@
 """DataUpdateCoordinator for Alpaca Bridge."""
 import asyncio
+import contextlib
 from datetime import timedelta
 from typing import Any, Callable, Dict
 
@@ -10,7 +11,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DOMAIN, DEFAULT_SCAN_INTERVAL, API_BASE, LOGGER, DEFAULT_MAX_SENSOR_AGE
+from .const import (
+    DOMAIN, DEFAULT_SCAN_INTERVAL, MIN_SCAN_INTERVAL, MAX_CONCURRENT_REQUESTS, API_BASE, LOGGER,
+    DEFAULT_MAX_SENSOR_AGE,
+)
+
+# UniqueId values of servers that do not really provide one
+GENERIC_UNIQUE_IDS = ("null", "none", "", "string")
 
 OBSERVINGCONDITIONS_PROPS = (
     "cloudcover", "dewpoint", "humidity", "pressure", "temperature", "windspeed", "starfwhm",
@@ -39,14 +46,31 @@ class AlpacaConnectionError(Exception):
 class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
     """Class to manage fetching Alpaca data from the server."""
 
-    def __init__(self, hass: HomeAssistant, host: str, port: int, devices: list, scan_interval: int = DEFAULT_SCAN_INTERVAL, max_sensor_age: int = DEFAULT_MAX_SENSOR_AGE) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        host: str,
+        port: int,
+        devices: list,
+        scan_interval: int = DEFAULT_SCAN_INTERVAL,
+        max_sensor_age: int = DEFAULT_MAX_SENSOR_AGE,
+        uid_host: "str | None" = None,
+    ) -> None:
         """Initialize."""
         self.host = host
         self.port = port
         self.devices = devices
+        self.uid_host = uid_host or host
         self.base_url = f"http://{host}:{port}/{API_BASE}"
         self._client_transaction_id = 1
         self.max_sensor_age = max_sensor_age
+
+        # Requests that run at the same time during a poll (created per poll, in the running loop)
+        self._semaphore: "asyncio.Semaphore | None" = None
+        # The poll that follows a command (a new command replaces it)
+        self._smart_poll_task = None
+        # Properties already reported as HTTP 400 / 404 (one warning, not one per poll)
+        self._warned: set = set()
 
         # Values the user entered in number / select entities and did not send to the device yet. They are kept
         # here and not in `data`, because every poll builds `data` from scratch. A button reads them and clears
@@ -64,8 +88,24 @@ class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
             hass,
             LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=scan_interval),
+            update_interval=timedelta(seconds=max(MIN_SCAN_INTERVAL, scan_interval)),
         )
+
+    def set_scan_interval(self, seconds: float) -> None:
+        """Poll every `seconds` (not faster than MIN_SCAN_INTERVAL)."""
+        self.update_interval = timedelta(seconds=max(MIN_SCAN_INTERVAL, seconds))
+
+    def device_uid(self, device: dict) -> str:
+        """The unique ID of a device: its Alpaca UniqueId, or one built from the server and the device.
+
+        The fallback is used when the server gives none, a generic one, or the same one for several devices
+        (their entities would collide).
+        """
+        uid = device.get("UniqueId")
+        if uid and str(uid).lower() not in GENERIC_UNIQUE_IDS:
+            if sum(1 for other in self.devices if other.get("UniqueId") == uid) == 1:
+                return uid
+        return f"{self.uid_host}_{device['DeviceType'].lower()}_{device['DeviceNumber']}"
 
     def get_client_transaction_id(self) -> int:
         """Get and increment the ClientTransactionID, resetting before reaching the 32-bit unsigned limit."""
@@ -93,6 +133,7 @@ class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
         """Update data via HTTP."""
         self._responses = 0
         self._failures = 0
+        self._semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
         session = async_get_clientsession(self.hass)
         data: Dict[str, Dict[str, Any]] = {}
         tasks = []
@@ -281,10 +322,14 @@ class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
             caps = {p: bool(v[p]) for p in CAMERA_CAPABILITIES}
             modes = v["readoutmodes"]
             caps["readoutmodes"] = modes if isinstance(modes, list) else []
+            # sensor size in pixels: the limit of the subframe settings (None when the camera does not say)
+            caps["cameraxsize"] = v["cameraxsize"]
+            caps["cameraysize"] = v["cameraysize"]
             return caps
 
         data[dev_key]["capabilities"] = await self._static(
-            ("caps", dev_key), session, "camera", dev_num, CAMERA_CAPABILITIES + ("readoutmodes",), build
+            ("caps", dev_key), session, "camera", dev_num,
+            CAMERA_CAPABILITIES + ("readoutmodes", "cameraxsize", "cameraysize"), build,
         )
 
     async def _fetch_filterwheel_meta(self, session, data, dev_key, dev_num):
@@ -354,27 +399,32 @@ class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
         sep = "&" if "?" in prop else "?"
         url = f"{self.base_url}/{dev_type.lower()}/{dev_num}/{prop}{sep}ClientID=1&ClientTransactionID={tid}"
 
+        warned_key = (dev_type.lower(), dev_num, prop.split("?")[0])
         try:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                self._responses += 1
-                if response.status == 200:
-                    res = await response.json()
-                    # ErrorNumber 0 means success.
-                    # Some devices return ErrorNumber 1024 (Not Implemented) for optional properties.
-                    if res.get("ErrorNumber") == 0:
-                        return res.get("Value")
-                elif response.status == 400:
-                    LOGGER.warning(
-                        "HTTP 400 for %s – check device type/number spelling in config (URL: %s)",
-                        prop, url
-                    )
-                elif response.status == 404:
-                    LOGGER.warning("HTTP 404 for %s – device not found (URL: %s)", prop, url)
-                else:
-                    LOGGER.debug("HTTP %s for %s (URL: %s)", response.status, prop, url)
-                    if strict and response.status >= 500:
-                        raise AlpacaConnectionError(f"HTTP {response.status} for {prop}")
-                return None
+            # at most MAX_CONCURRENT_REQUESTS at the same time during a poll
+            async with self._semaphore or contextlib.nullcontext():
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    self._responses += 1
+                    if response.status == 200:
+                        self._warned.discard(warned_key)
+                        res = await response.json()
+                        # ErrorNumber 0 means success.
+                        # Some devices return ErrorNumber 1024 (Not Implemented) for optional properties.
+                        if res.get("ErrorNumber") == 0:
+                            return res.get("Value")
+                    elif response.status in (400, 404):
+                        # one warning per property until it answers again, not one per poll
+                        level = LOGGER.debug if warned_key in self._warned else LOGGER.warning
+                        self._warned.add(warned_key)
+                        level(
+                            "HTTP %s for %s – check that the device exists on the server (URL: %s)",
+                            response.status, prop, url,
+                        )
+                    else:
+                        LOGGER.debug("HTTP %s for %s (URL: %s)", response.status, prop, url)
+                        if strict and response.status >= 500:
+                            raise AlpacaConnectionError(f"HTTP {response.status} for {prop}")
+                    return None
         except AlpacaConnectionError:
             raise
         except Exception as err:
@@ -418,8 +468,36 @@ class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
             raise HomeAssistantError(f"{dev_type} {dev_num}: {command} failed: {message} (Alpaca error {err_num})")
 
         # Schedule a fast follow-up poll to catch quick state changes (Smart Polling)
-        self.hass.async_create_task(self._smart_poll())
+        self._schedule_smart_poll()
         return True
+
+    async def prepare_slew(self, dev_type: str, dev_num: int, *, altaz: bool) -> None:
+        """Get the mount into the state a slew needs.
+
+        A parked mount cannot slew. An Alt/Az slew needs tracking off, an equatorial slew needs it on (as
+        N.I.N.A. does it as well).
+        """
+        dev_key = f"{dev_type.lower()}_{dev_num}"
+        data = (self.data or {}).get(dev_key, {})
+        if data.get("atpark"):
+            raise HomeAssistantError(f"{dev_type} {dev_num} is parked, unpark it first")
+        tracking = data.get("tracking")
+        if altaz and tracking:
+            await self.send_command(dev_type, dev_num, "tracking", {"Tracking": "False"})
+            await asyncio.sleep(1)  # let the mount process the change
+        elif not altaz and tracking is False and data.get("capabilities", {}).get("cansettracking"):
+            await self.send_command(dev_type, dev_num, "tracking", {"Tracking": "True"})
+
+    def _schedule_smart_poll(self) -> None:
+        """Start the follow-up poll of a command; a poll that is still running is replaced."""
+        self.cancel_smart_poll()
+        self._smart_poll_task = self.hass.async_create_task(self._smart_poll())
+
+    def cancel_smart_poll(self) -> None:
+        """Stop the follow-up poll (new command, unload)."""
+        task, self._smart_poll_task = self._smart_poll_task, None
+        if task is not None and not task.done():
+            task.cancel()
 
     async def _smart_poll(self) -> None:
         """Intelligently poll a few times after a command to catch state changes quickly.

@@ -35,6 +35,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             data = coordinator.data.get(dev_key, {})
             caps = data.get("capabilities", {})
             
+            entities.append(AlpacaCameraLightSwitch(coordinator, device))
             if "cooleron" in data:
                 entities.append(AlpacaCameraPropertySwitch(coordinator, device, "cooleron", "Cooler", "mdi:snowflake"))
             if "fastreadout" in data and caps.get("canfastreadout", False):
@@ -291,6 +292,29 @@ class AlpacaCameraPropertySwitch(AlpacaEntity, SwitchEntity):
     def available(self) -> bool:
         """Return True if entity is available."""
         return super().available and self.coordinator.data.get(self.dev_key, {}).get(self.prop) is not None
+
+class AlpacaCameraLightSwitch(AlpacaEntity, SwitchEntity):
+    """Light (on) or dark (off) frame for the "Start Exposure" button."""
+
+    def __init__(self, coordinator, device):
+        """Initialize."""
+        super().__init__(coordinator, device)
+        self._attr_name = f"{self._device_name} Light Frame"
+        self._attr_unique_id = f"{super().unique_id}_exposure_light"
+        self._attr_icon = "mdi:white-balance-sunny"
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.coordinator.get_target(self.dev_key, "exposure_light", True))
+
+    async def async_turn_on(self, **kwargs) -> None:
+        self.coordinator.set_target(self.dev_key, "exposure_light", True)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs) -> None:
+        self.coordinator.set_target(self.dev_key, "exposure_light", False)
+        self.async_write_ha_state()
+
 
 class AlpacaRotatorReverseSwitch(AlpacaEntity, SwitchEntity):
     """Switch for rotator reverse direction."""

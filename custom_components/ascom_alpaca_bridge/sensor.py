@@ -99,6 +99,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     entities.append(AlpacaFilterWheelOffsetSensor(coordinator, device))
         
         elif device["DeviceType"].lower() == "camera":
+            dev_key = f"camera_{device['DeviceNumber']}"
+            data = coordinator.data.get(dev_key, {})
+
             # State sensor
             entities.append(AlpacaTelescopeTextSensor(
                 coordinator, device, "camerastate",
@@ -119,6 +122,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
             }
             
             for prop, conf in numeric_props.items():
+                if prop not in data:  # the camera does not have this property
+                    continue
                 entities.append(AlpacaObservingConditionSensor(
                     coordinator, device, prop,
                     {
@@ -157,6 +162,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
             for prop, config in text_props.items():
                 if prop in data:
                     entities.append(AlpacaTelescopeTextSensor(coordinator, device, prop, config))
+
+            # the tracking rate is a select (select.py) when the mount can change it, otherwise a sensor
+            if "trackingrate" in data and not caps.get("cansettracking"):
+                entities.append(AlpacaTelescopeTextSensor(
+                    coordinator, device, "trackingrate",
+                    {"name": "Tracking Rate", "icon": "mdi:speedometer", "mapper": TRACKING_RATES_MAP.get}
+                ))
                     
             basic_props = {
                 "aperturearea": {"name": "Aperture Area", "device_class": None, "unit": "m²", "icon": "mdi:circle-outline", "precision": None},
@@ -231,8 +243,16 @@ async def async_setup_entry(hass, entry, async_add_entities):
         async_add_entities(entities)
 
 
+# properties that are fixed for a device: no long term statistics
+STATIC_PROPS = {
+    "aperturearea", "aperturediameter", "focallength", "sitelatitude", "sitelongitude", "siteelevation",
+    "slewsettletime", "electronsperadu", "fullwellcapacity", "maxadu", "pixelsizex", "pixelsizey",
+    "stepsize", "maxstep", "maxincrement",
+}
+
+
 class AlpacaObservingConditionSensor(AlpacaEntity, SensorEntity):
-    """Observing Conditions Sensor."""
+    """Observing Conditions Sensor (also used for the numeric values of the other device types)."""
 
     def __init__(self, coordinator, device, prop, config):
         """Initialize."""
@@ -243,7 +263,7 @@ class AlpacaObservingConditionSensor(AlpacaEntity, SensorEntity):
         self._attr_device_class = config["device_class"]
         self._attr_native_unit_of_measurement = config["unit"]
         self._attr_icon = config["icon"]
-        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_state_class = None if prop in STATIC_PROPS else SensorStateClass.MEASUREMENT
         if "precision" in config:
             self._attr_suggested_display_precision = config["precision"]
 
@@ -295,25 +315,24 @@ class AlpacaSwitchValueSensor(AlpacaEntity, SensorEntity):
         return super().available and f"switchvalue_{self.switch_id}" in self.coordinator.data.get(self.dev_key, {})
 
 
+def _split_sexagesimal(value):
+    """Decimal hours / degrees as (sign, whole, minutes, seconds), seconds rounded to 0.1 without ever
+    showing 60.0."""
+    tenths = round(abs(value) * 3600 * 10)  # tenths of a second
+    whole, rest = divmod(tenths, 36000)
+    minutes, rest = divmod(rest, 600)
+    return "-" if value < 0 and tenths else "", whole, minutes, rest / 10
+
+
 def _format_hms(value):
     """Format decimal hours as HHh MMm SSs."""
-    negative = value < 0
-    value = abs(value)
-    h = int(value)
-    m = int((value - h) * 60)
-    s = (value - h - m / 60) * 3600
-    sign = "-" if negative else ""
+    sign, h, m, s = _split_sexagesimal(value)
     return f"{sign}{h}h {m:02d}m {s:04.1f}s"
 
 
 def _format_dms(value):
     """Format decimal degrees as DD° MM' SS\"."""
-    negative = value < 0
-    value = abs(value)
-    d = int(value)
-    m = int((value - d) * 60)
-    s = (value - d - m / 60) * 3600
-    sign = "-" if negative else ""
+    sign, d, m, s = _split_sexagesimal(value)
     return f"{sign}{d}° {m:02d}' {s:04.1f}\""
 
 
