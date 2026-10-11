@@ -292,7 +292,8 @@ def run_retry(ha: Ha, server: str = None):
     if not down:
         return report.finish()
 
-    status, _ = ha.request("POST", f"/api/config/config_entries/entry/{entry_id}/reload")
+    # the request returns when the setup attempt is over; a client that gives up cancels the setup (setup_error)
+    status, _ = ha.request("POST", f"/api/config/config_entries/entry/{entry_id}/reload", timeout=240)
     retrying = wait_for(lambda: entry_state(ha, entry_id) == "setup_retry", 90, 2)
     report.add("retry", "reload without a server gives setup_retry", bool(retrying), f"state {entry_state(ha, entry_id)}")
 

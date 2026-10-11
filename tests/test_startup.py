@@ -69,3 +69,15 @@ def test_a_property_the_server_does_not_implement_is_cached_as_false():
 def test_the_coordinator_does_not_use_the_deprecated_async_timeout():
     source = pathlib.Path(__file__).resolve().parents[1] / "custom_components/ascom_alpaca_bridge/coordinator.py"
     assert "async_timeout" not in source.read_text(encoding="utf-8")
+
+
+def test_a_server_that_does_not_answer_costs_one_request_not_a_hundred():
+    """Found live: with the server stopped every request ran into its 10 s timeout."""
+    alpaca = FakeAlpaca()
+    alpaca.up = False
+    coordinator = make_coordinator(alpaca, [device("Telescope"), device("Camera"), device("Dome")])
+
+    run(coordinator.async_refresh())
+
+    assert not coordinator.last_update_success
+    assert len(alpaca.requests) == 1  # only the probe

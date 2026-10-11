@@ -125,11 +125,15 @@ class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
         """Update data via HTTP."""
         self._responses = 0
         self._failures = 0
+        session = async_get_clientsession(self.hass)
+        # A server that does not answer would cost the 10 s timeout of every one of the ~100 requests (found
+        # live: a stopped ASCOM Remote server made a setup take over a minute): one quick request first.
+        if not await self._server_reachable(session):
+            raise UpdateFailed(f"Alpaca server {self.host}:{self.port} is not reachable")
         self._semaphores = {
             f"{device['DeviceType'].lower()}_{device['DeviceNumber']}": asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
             for device in self.devices
         }
-        session = async_get_clientsession(self.hass)
         data: Dict[str, Dict[str, Any]] = {}
         tasks = []
 
@@ -212,6 +216,16 @@ class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Alpaca server {self.host}:{self.port} is not reachable")
 
         return data
+
+    async def _server_reachable(self, session) -> bool:
+        """True when the server answers at all (any HTTP answer counts)."""
+        url = f"http://{self.host}:{self.port}/management/apiversions"
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)):
+                return True
+        except Exception as err:
+            LOGGER.debug("Alpaca server %s:%s does not answer: %s", self.host, self.port, err)
+            return False
 
     async def _fetch_prop_task(self, session, data, dev_key, dev_type, dev_num, prop):
         """Helper to fetch a single property and assign it to the data dict."""
