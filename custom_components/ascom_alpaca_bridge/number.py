@@ -2,7 +2,6 @@ from homeassistant.components.number import NumberEntity, NumberMode
 
 from .const import DOMAIN, LOGGER
 from .base import AlpacaEntity
-import time
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up the number platform."""
@@ -62,8 +61,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     
             if caps.get("cansetdeclinationrate") and "declinationrate" in data:
                 entities.append(AlpacaTelescopePropertyNumber(coordinator, device, 
-                    {"prop": "declinationrate", "name": "Declination Rate", "min": -10.0, "max": 10.0, "step": 0.00001, "unit": "°/s", "icon": "mdi:delta"}))
-            if caps.get("cansetrightascensionrate") and "rightascensionrate" in data:
+                    {"prop": "declinationrate", "name": "Declination Rate", "min": -10.0, "max": 10.0, "step": 0.00001, "unit": "arcsec/s", "icon": "mdi:delta"}))
+            if caps.get("cansetrightascensionrate")and "rightascensionrate" in data:
                 entities.append(AlpacaTelescopePropertyNumber(coordinator, device, 
                     {"prop": "rightascensionrate", "name": "RA Rate", "min": -10.0, "max": 10.0, "step": 0.00001, "unit": "s/s", "icon": "mdi:delta"}))
                     
@@ -148,7 +147,7 @@ class AlpacaCalibratorNumber(AlpacaEntity, NumberEntity):
     def native_value(self):
         """Return the target brightness value."""
         data = self.coordinator.data.get(self.dev_key, {})
-        return data.get("target_brightness", data.get("brightness"))
+        return self.coordinator.get_target(self.dev_key, "target_brightness", data.get("brightness"))
 
     @property
     def native_min_value(self):
@@ -168,8 +167,7 @@ class AlpacaCalibratorNumber(AlpacaEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         """Update the current value (stored locally)."""
         LOGGER.debug("Setting CoverCalibrator %s target brightness to %s via Number entity", self.dev_key, int(value))
-        self.coordinator.data.setdefault(self.dev_key, {})["target_brightness"] = value
-        self.coordinator.data[self.dev_key]["target_brightness_timestamp"] = time.time()
+        self.coordinator.set_target(self.dev_key, "target_brightness", value)
         self.async_write_ha_state()
 
     @property
@@ -247,17 +245,12 @@ class AlpacaTelescopeTargetNumber(AlpacaEntity, NumberEntity):
     @property
     def native_value(self):
         """Return the current target value."""
-        data = self.coordinator.data.get(self.dev_key, {})
-        return data.get(self._target_key)
+        return self.coordinator.get_target(self.dev_key, self._target_key)
 
     async def async_set_native_value(self, value: float) -> None:
-        """Set the target value (stored locally in coordinator data, not sent to device)."""
+        """Set the target value (kept by the coordinator for the slew buttons, not sent to the device)."""
         LOGGER.debug("Telescope %s: setting %s to %s", self.dev_key, self._target_key, value)
-        # Store the target value in coordinator data for the slew buttons to use
-        if self.dev_key not in self.coordinator.data:
-            self.coordinator.data[self.dev_key] = {}
-        self.coordinator.data[self.dev_key][self._target_key] = value
-        self.coordinator.data[self.dev_key][f"{self._target_key}_timestamp"] = time.time()
+        self.coordinator.set_target(self.dev_key, self._target_key, value)
         self.async_write_ha_state()
 
 class AlpacaTelescopePropertyNumber(AlpacaEntity, NumberEntity):
@@ -280,17 +273,13 @@ class AlpacaTelescopePropertyNumber(AlpacaEntity, NumberEntity):
     def native_value(self):
         """Return the target or current property value."""
         data = self.coordinator.data.get(self.dev_key, {})
-        target_dict = data.get("target_telescope", {})
+        target_dict = self.coordinator.target_group(self.dev_key, "telescope")
         return target_dict.get(self.prop, data.get(self.prop))
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the target property value locally."""
         LOGGER.debug("Telescope %s: storing target %s = %s", self.dev_key, self.prop, value)
-        if "target_telescope" not in self.coordinator.data.setdefault(self.dev_key, {}):
-            self.coordinator.data[self.dev_key]["target_telescope"] = {}
-        
-        self.coordinator.data[self.dev_key]["target_telescope"][self.prop] = value
-        self.coordinator.data[self.dev_key]["target_telescope_timestamp"] = time.time()
+        self.coordinator.target_group(self.dev_key, "telescope")[self.prop] = value
         self.async_write_ha_state()
             
     @property
@@ -351,17 +340,13 @@ class AlpacaCameraPropertyNumber(AlpacaEntity, NumberEntity):
     def native_value(self) -> float | None:
         """Return the target or current property value."""
         data = self.coordinator.data.get(self.dev_key, {})
-        target_dict = data.get("target_camera", {})
+        target_dict = self.coordinator.target_group(self.dev_key, "camera")
         return target_dict.get(self.prop, data.get(self.prop))
 
     async def async_set_native_value(self, value: float) -> None:
         """Store the property value locally."""
         LOGGER.debug("Camera %s: storing target %s = %s", self.dev_key, self.prop, value)
-        if "target_camera" not in self.coordinator.data.setdefault(self.dev_key, {}):
-            self.coordinator.data[self.dev_key]["target_camera"] = {}
-            
-        self.coordinator.data[self.dev_key]["target_camera"][self.prop] = value
-        self.coordinator.data[self.dev_key]["target_camera_timestamp"] = time.time()
+        self.coordinator.target_group(self.dev_key, "camera")[self.prop] = value
         self.async_write_ha_state()
 
     @property
@@ -398,11 +383,11 @@ class AlpacaRotatorTargetNumber(AlpacaEntity, NumberEntity):
     def native_value(self):
         """Return the target position."""
         data = self.coordinator.data.get(self.dev_key, {})
-        return data.get("rotator_target_position", data.get("position"))
+        return self.coordinator.get_target(self.dev_key, "rotator_target_position", data.get("position"))
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the target position locally."""
-        self.coordinator.data.setdefault(self.dev_key, {})["rotator_target_position"] = value
+        self.coordinator.set_target(self.dev_key, "rotator_target_position", value)
         self.async_write_ha_state()
 
     @property
@@ -414,8 +399,8 @@ class AlpacaRotatorTargetNumber(AlpacaEntity, NumberEntity):
 class AlpacaRotatorVirtualNumber(AlpacaEntity, NumberEntity):
     """A virtual number input for the rotator (relative move or sync position).
 
-    The value is stored in coordinator.data[dev_key][key] and read by
-    the corresponding AlpacaRotatorActionButton to execute the command.
+    The value is kept by the coordinator (targets[dev_key][key]) and read by
+    the corresponding button to execute the command.
     """
 
     def __init__(self, coordinator, device, key: str, config: dict, default: float = 0.0):
@@ -430,18 +415,17 @@ class AlpacaRotatorVirtualNumber(AlpacaEntity, NumberEntity):
         self._attr_native_step = config.get("step", 1.0)
         self._attr_native_unit_of_measurement = config.get("unit", "°")
         self._attr_mode = NumberMode.BOX
-        # Initialise the value slot in coordinator data
-        self.coordinator.data.setdefault(self.dev_key, {})[key] = default
+        self._default = default
 
     @property
     def native_value(self) -> float:
         """Return the stored value."""
-        return self.coordinator.data.get(self.dev_key, {}).get(self._key, 0.0)
+        return self.coordinator.get_target(self.dev_key, self._key, self._default)
 
     async def async_set_native_value(self, value: float) -> None:
-        """Store the value in coordinator data for the action button to use."""
+        """Store the value for the action button to use."""
         LOGGER.debug("Rotator %s: storing %s = %s", self.dev_key, self._key, value)
-        self.coordinator.data.setdefault(self.dev_key, {})[self._key] = value
+        self.coordinator.set_target(self.dev_key, self._key, value)
         self.async_write_ha_state()
 
     @property
@@ -465,7 +449,7 @@ class AlpacaFocuserTargetNumber(AlpacaEntity, NumberEntity):
     def native_value(self):
         """Return the target position."""
         data = self.coordinator.data.get(self.dev_key, {})
-        return data.get("focuser_target_position", data.get("position"))
+        return self.coordinator.get_target(self.dev_key, "focuser_target_position", data.get("position"))
 
     @property
     def native_min_value(self):
@@ -486,7 +470,7 @@ class AlpacaFocuserTargetNumber(AlpacaEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Update the target position locally."""
-        self.coordinator.data.setdefault(self.dev_key, {})["focuser_target_position"] = value
+        self.coordinator.set_target(self.dev_key, "focuser_target_position", value)
         self.async_write_ha_state()
 
     @property
@@ -514,11 +498,11 @@ class AlpacaDomeTargetNumber(AlpacaEntity, NumberEntity):
     def native_value(self):
         """Return the target position."""
         data = self.coordinator.data.get(self.dev_key, {})
-        return data.get(f"dome_target_{self.prop}", data.get(self.prop))
+        return self.coordinator.get_target(self.dev_key, f"dome_target_{self.prop}", data.get(self.prop))
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the target position locally."""
-        self.coordinator.data.setdefault(self.dev_key, {})[f"dome_target_{self.prop}"] = value
+        self.coordinator.set_target(self.dev_key, f"dome_target_{self.prop}", value)
         self.async_write_ha_state()
 
     @property
@@ -538,15 +522,11 @@ class AlpacaCameraExposureNumber(AlpacaEntity, NumberEntity):
         self._attr_icon = "mdi:timer"
         self._attr_mode = NumberMode.BOX
         self._attr_native_unit_of_measurement = "s"
-        
-        # Initialize default locally if missing
-        if self.prop not in coordinator.data[self.dev_key]:
-            coordinator.data[self.dev_key][self.prop] = 1.0
 
     @property
     def native_value(self) -> float:
         """Return the target exposure value."""
-        return self.coordinator.data[self.dev_key].get(self.prop, 1.0)
+        return self.coordinator.get_target(self.dev_key, self.prop, 1.0)
 
     @property
     def native_min_value(self) -> float:
@@ -570,7 +550,7 @@ class AlpacaCameraExposureNumber(AlpacaEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the exposure value."""
-        self.coordinator.data[self.dev_key][self.prop] = float(value)
+        self.coordinator.set_target(self.dev_key, self.prop, float(value))
         self.async_write_ha_state()
 
     @property

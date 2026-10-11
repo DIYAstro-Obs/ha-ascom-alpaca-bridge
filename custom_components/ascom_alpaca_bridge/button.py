@@ -147,7 +147,7 @@ class AlpacaTelescopeSlewButton(AlpacaEntity, ButtonEntity):
         data = self.coordinator.data.get(self.dev_key, {})
         params = {}
         for key, param_name in zip(self._target_keys, self._param_names):
-            value = data.get(key)
+            value = self.coordinator.get_target(self.dev_key, key)
             if value is None:
                 LOGGER.warning("Telescope %s: Cannot slew, %s not set", self.dev_key, key)
                 return
@@ -156,13 +156,10 @@ class AlpacaTelescopeSlewButton(AlpacaEntity, ButtonEntity):
         # Alt/Az slew requires tracking to be off
         if self._command == "slewtoaltazasync" and data.get("tracking"):
             LOGGER.debug("Telescope %s: disabling tracking for Alt/Az slew", self.dev_key)
-            success = await self.coordinator.send_command(
+            await self.coordinator.send_command(
                 self.dev_type, self.dev_num, "tracking",
                 {"Tracking": "False"}
             )
-            if not success:
-                LOGGER.error("Telescope %s: failed to disable tracking, aborting slew", self.dev_key)
-                return
             # Wait for telescope to process tracking change
             await asyncio.sleep(1)
 
@@ -255,7 +252,7 @@ class AlpacaCameraStartExposureButton(AlpacaEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        duration = self.coordinator.data.get(self.dev_key, {}).get("target_exposure", 1.0)
+        duration = self.coordinator.get_target(self.dev_key, "target_exposure", 1.0)
         LOGGER.debug("Camera %s: Start Exposure (Duration=%s)", self.dev_key, duration)
         success = await self.coordinator.send_command(self.dev_type, self.dev_num, "startexposure", {"Duration": str(duration), "Light": "True"})
         if success:
@@ -274,7 +271,7 @@ class AlpacaRotatorMoveButton(AlpacaEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Send relative move command using the stored move_relative value."""
-        amount = self.coordinator.data.get(self.dev_key, {}).get("move_relative", 0.0)
+        amount = self.coordinator.get_target(self.dev_key, "move_relative", 0.0)
         LOGGER.debug("Rotator %s: move (relative) %s°", self.dev_key, amount)
         success = await self.coordinator.send_command(
             self.dev_type, self.dev_num, "move", {"Position": str(amount)}
@@ -300,7 +297,7 @@ class AlpacaRotatorSyncButton(AlpacaEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Send sync command using the stored sync_position value."""
-        position = self.coordinator.data.get(self.dev_key, {}).get("sync_position", 0.0)
+        position = self.coordinator.get_target(self.dev_key, "sync_position", 0.0)
         LOGGER.debug("Rotator %s: sync to %s°", self.dev_key, position)
         success = await self.coordinator.send_command(
             self.dev_type, self.dev_num, "sync", {"Position": str(position)}
@@ -325,12 +322,12 @@ class AlpacaFocuserMoveAction(AlpacaEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press."""
         data = self.coordinator.data.get(self.dev_key, {})
-        pos = data.get("focuser_target_position", data.get("position"))
+        pos = self.coordinator.get_target(self.dev_key, "focuser_target_position", data.get("position"))
         if pos is not None:
             LOGGER.debug("Focuser %s: Move to %s", self.dev_key, int(pos))
-            success = await self.coordinator.send_command(self.dev_type, self.dev_num, "move", {"Position": str(int(pos))})
-            if success:
-                await self.coordinator.async_refresh()
+            await self.coordinator.send_command(self.dev_type, self.dev_num, "move", {"Position": str(int(pos))})
+            self.coordinator.clear_target(self.dev_key, "focuser_target_position")
+            await self.coordinator.async_refresh()
 
 class AlpacaRotatorMoveAbsoluteAction(AlpacaEntity, ButtonEntity):
     """Rotator Move Absolute button."""
@@ -343,12 +340,12 @@ class AlpacaRotatorMoveAbsoluteAction(AlpacaEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press."""
         data = self.coordinator.data.get(self.dev_key, {})
-        pos = data.get("rotator_target_position", data.get("position"))
+        pos = self.coordinator.get_target(self.dev_key, "rotator_target_position", data.get("position"))
         if pos is not None:
             LOGGER.debug("Rotator %s: move (absolute) to %s°", self.dev_key, pos)
-            success = await self.coordinator.send_command(self.dev_type, self.dev_num, "moveabsolute", {"Position": str(pos)})
-            if success:
-                await self.coordinator.async_refresh()
+            await self.coordinator.send_command(self.dev_type, self.dev_num, "moveabsolute", {"Position": str(pos)})
+            self.coordinator.clear_target(self.dev_key, "rotator_target_position")
+            await self.coordinator.async_refresh()
 
 class AlpacaDomeSlewAction(AlpacaEntity, ButtonEntity):
     """Dome Slew button."""
@@ -362,14 +359,14 @@ class AlpacaDomeSlewAction(AlpacaEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press."""
         data = self.coordinator.data.get(self.dev_key, {})
-        val = data.get(f"dome_target_{self.prop}", data.get(self.prop))
+        val = self.coordinator.get_target(self.dev_key, f"dome_target_{self.prop}", data.get(self.prop))
         if val is not None:
             cmd = "slewtoaltitude" if self.prop == "altitude" else "slewtoazimuth"
             param_name = "Altitude" if self.prop == "altitude" else "Azimuth"
             LOGGER.debug("Dome %s: %s to %s", self.dev_key, cmd, val)
-            success = await self.coordinator.send_command(self.dev_type, self.dev_num, cmd, {param_name: str(val)})
-            if success:
-                await self.coordinator.async_refresh()
+            await self.coordinator.send_command(self.dev_type, self.dev_num, cmd, {param_name: str(val)})
+            self.coordinator.clear_target(self.dev_key, f"dome_target_{self.prop}")
+            await self.coordinator.async_refresh()
 
 class AlpacaTelescopeFlipPierButton(AlpacaEntity, ButtonEntity):
     """Button to flip the pier side."""
@@ -410,14 +407,14 @@ class AlpacaCalibratorBrightnessButton(AlpacaEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press."""
         data = self.coordinator.data.get(self.dev_key, {})
-        target = data.get("target_brightness", data.get("brightness", 0))
+        target = self.coordinator.get_target(self.dev_key, "target_brightness", data.get("brightness", 0))
         LOGGER.debug("CoverCalibrator %s: setting brightness to %s", self.dev_key, int(target))
-        success = await self.coordinator.send_command(
-            self.dev_type, self.dev_num, "calibratoron", 
+        await self.coordinator.send_command(
+            self.dev_type, self.dev_num, "calibratoron",
             {"Brightness": str(int(target))}
         )
-        if success:
-            await self.coordinator.async_refresh()
+        self.coordinator.clear_target(self.dev_key, "target_brightness")
+        await self.coordinator.async_refresh()
 
 class AlpacaFilterWheelApplyButton(AlpacaEntity, ButtonEntity):
     """Button to apply the selected target filter."""
@@ -430,15 +427,15 @@ class AlpacaFilterWheelApplyButton(AlpacaEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press."""
         data = self.coordinator.data.get(self.dev_key, {})
-        pos = data.get("target_position", data.get("position"))
+        pos = self.coordinator.get_target(self.dev_key, "target_position", data.get("position"))
         if pos is not None and pos >= 0:
             LOGGER.debug("FilterWheel %s: setting position to %s", self.dev_key, pos)
-            success = await self.coordinator.send_command(
+            await self.coordinator.send_command(
                 self.dev_type, self.dev_num, "position",
                 {"Position": str(pos)}
             )
-            if success:
-                await self.coordinator.async_refresh()
+            self.coordinator.clear_target(self.dev_key, "target_position")
+            await self.coordinator.async_refresh()
 
 class AlpacaCameraApplySettingsButton(AlpacaEntity, ButtonEntity):
     """Button to apply camera target settings simultaneously."""
@@ -450,8 +447,7 @@ class AlpacaCameraApplySettingsButton(AlpacaEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        data = self.coordinator.data.get(self.dev_key, {})
-        target_dict = data.get("target_camera", {})
+        target_dict = self.coordinator.target_group(self.dev_key, "camera")
         if not target_dict:
             LOGGER.debug("Camera %s: no target settings to apply", self.dev_key)
             return
@@ -462,23 +458,18 @@ class AlpacaCameraApplySettingsButton(AlpacaEntity, ButtonEntity):
             "startx": "StartX", "starty": "StartY", "readoutmode": "ReadoutMode"
         }
 
-        success = True
         for prop, value in list(target_dict.items()):
             formatted_val = f"{value:.2f}" if "temperature" in prop else str(int(value))
             p_case = prop_cased.get(prop, prop)
             LOGGER.debug("Camera %s: applying %s = %s", self.dev_key, p_case, formatted_val)
-            res = await self.coordinator.send_command(
+            # a failing command raises: the settings not applied yet stay entered
+            await self.coordinator.send_command(
                 self.dev_type, self.dev_num, prop.lower(),
                 {p_case: formatted_val}
             )
-            if res:
-                # remove applied property
-                target_dict.pop(prop, None)
-            else:
-                success = False
+            target_dict.pop(prop, None)  # applied
 
-        if success:
-            await self.coordinator.async_refresh()
+        await self.coordinator.async_refresh()
 
 class AlpacaTelescopeApplySettingsButton(AlpacaEntity, ButtonEntity):
     """Button to apply telescope target settings simultaneously."""
@@ -490,8 +481,7 @@ class AlpacaTelescopeApplySettingsButton(AlpacaEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        data = self.coordinator.data.get(self.dev_key, {})
-        target_dict = data.get("target_telescope", {})
+        target_dict = self.coordinator.target_group(self.dev_key, "telescope")
         if not target_dict:
             LOGGER.debug("Telescope %s: no target settings to apply", self.dev_key)
             return
@@ -511,21 +501,16 @@ class AlpacaTelescopeApplySettingsButton(AlpacaEntity, ButtonEntity):
             "trackingrate": "TrackingRate"
         }
 
-        success = True
         for prop, value in list(target_dict.items()):
             param_name = param_name_map.get(prop)
             if not param_name:
                 continue
 
             LOGGER.debug("Telescope %s: applying target %s = %s", self.dev_key, param_name, value)
-            res = await self.coordinator.send_command(
+            # a failing command raises: the settings not applied yet stay entered
+            await self.coordinator.send_command(
                 self.dev_type, self.dev_num, prop, {param_name: str(value)}
             )
-            if res:
-                # remove applied property
-                target_dict.pop(prop, None)
-            else:
-                success = False
+            target_dict.pop(prop, None)  # applied
 
-        if success:
-            await self.coordinator.async_refresh()
+        await self.coordinator.async_refresh()

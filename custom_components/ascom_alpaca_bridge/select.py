@@ -2,7 +2,6 @@ from homeassistant.components.select import SelectEntity
 
 from .const import DOMAIN, LOGGER
 from .base import AlpacaEntity
-import time
 
 TRACKING_RATES = {
     0: "Sidereal",
@@ -62,7 +61,7 @@ class AlpacaTelescopeTrackingRateSelect(AlpacaEntity, SelectEntity):
     def current_option(self) -> str | None:
         """Return the target or current tracking rate."""
         data = self.coordinator.data.get(self.dev_key, {})
-        target_dict = data.get("target_telescope", {})
+        target_dict = self.coordinator.target_group(self.dev_key, "telescope")
         rate = target_dict.get("trackingrate", data.get("trackingrate"))
         if rate is None:
             return None
@@ -76,11 +75,7 @@ class AlpacaTelescopeTrackingRateSelect(AlpacaEntity, SelectEntity):
             return
 
         LOGGER.debug("Telescope %s: storing target tracking rate to %s (%s)", self.dev_key, option, rate)
-        if "target_telescope" not in self.coordinator.data.setdefault(self.dev_key, {}):
-            self.coordinator.data[self.dev_key]["target_telescope"] = {}
-
-        self.coordinator.data[self.dev_key]["target_telescope"]["trackingrate"] = rate
-        self.coordinator.data[self.dev_key]["target_telescope_timestamp"] = time.time()
+        self.coordinator.target_group(self.dev_key, "telescope")["trackingrate"] = rate
         self.async_write_ha_state()
 
     @property
@@ -113,7 +108,7 @@ class AlpacaFilterWheelSelect(AlpacaEntity, SelectEntity):
     def current_option(self) -> str | None:
         """Return the target or current filter name."""
         data = self.coordinator.data.get(self.dev_key, {})
-        pos = data.get("target_position", data.get("position"))
+        pos = self.coordinator.get_target(self.dev_key, "target_position", data.get("position"))
         opts = self.options
         if pos is None or pos < 0 or pos >= len(opts):
             return None # -1 means moving
@@ -128,8 +123,7 @@ class AlpacaFilterWheelSelect(AlpacaEntity, SelectEntity):
             return
             
         LOGGER.debug("FilterWheel %s: storing target position to %s (%s)", self.dev_key, pos, option)
-        self.coordinator.data.setdefault(self.dev_key, {})["target_position"] = pos
-        self.coordinator.data[self.dev_key]["target_position_timestamp"] = time.time()
+        self.coordinator.set_target(self.dev_key, "target_position", pos)
         self.async_write_ha_state()
 
     @property
@@ -169,7 +163,7 @@ class AlpacaCameraReadoutModeSelect(AlpacaEntity, SelectEntity):
     def current_option(self) -> str | None:
         """Return the target or current readout mode."""
         data = self.coordinator.data.get(self.dev_key, {})
-        target_dict = data.get("target_camera", {})
+        target_dict = self.coordinator.target_group(self.dev_key, "camera")
         rmode = target_dict.get("readoutmode", data.get("readoutmode"))
         opts = self.options
         if rmode is None or rmode < 0 or rmode >= len(opts):
@@ -185,11 +179,7 @@ class AlpacaCameraReadoutModeSelect(AlpacaEntity, SelectEntity):
             return
             
         LOGGER.debug("Camera %s: storing target readout mode to %s (%s)", self.dev_key, rmode, option)
-        if "target_camera" not in self.coordinator.data.setdefault(self.dev_key, {}):
-            self.coordinator.data[self.dev_key]["target_camera"] = {}
-            
-        self.coordinator.data[self.dev_key]["target_camera"]["readoutmode"] = rmode
-        self.coordinator.data[self.dev_key]["target_camera_timestamp"] = time.time()
+        self.coordinator.target_group(self.dev_key, "camera")["readoutmode"] = rmode
         self.async_write_ha_state()
 
     @property

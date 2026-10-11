@@ -173,7 +173,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     
             if caps.get("cansetdeclinationrate") and "declinationrate" in data:
                 entities.append(AlpacaObservingConditionSensor(coordinator, device, "declinationrate", 
-                    {"name": "Declination Rate", "device_class": None, "unit": "°/s", "icon": "mdi:delta", "precision": 5}))
+                    {"name": "Declination Rate", "device_class": None, "unit": "arcsec/s", "icon": "mdi:delta", "precision": 5}))
             if caps.get("cansetrightascensionrate") and "rightascensionrate" in data:
                 entities.append(AlpacaObservingConditionSensor(coordinator, device, "rightascensionrate", 
                     {"name": "RA Rate", "device_class": None, "unit": "s/s", "icon": "mdi:delta", "precision": 5}))

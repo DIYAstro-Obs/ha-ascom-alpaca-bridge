@@ -129,13 +129,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         # Disable tracking before Alt/Az slew (like N.I.N.A.)
                         if coord.data.get(dev_key, {}).get("tracking"):
                             LOGGER.debug("Service slew_to_alt_az: disabling tracking first")
-                            success = await coord.send_command(
+                            await coord.send_command(
                                 "telescope", dev["DeviceNumber"], "tracking",
                                 {"Tracking": "False"}
                             )
-                            if not success:
-                                LOGGER.error("Service slew_to_alt_az: failed to disable tracking")
-                                return
                             await asyncio.sleep(1)
                         LOGGER.debug("Service slew_to_alt_az: Alt=%s, Az=%s", alt, az)
                         await coord.send_command(
@@ -306,6 +303,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     new_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     LOGGER.debug("Updating scan interval to %s seconds", new_interval)
     coordinator.update_interval = timedelta(seconds=new_interval)
+    coordinator.max_sensor_age = entry.options.get(CONF_MAX_SENSOR_AGE, DEFAULT_MAX_SENSOR_AGE)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
