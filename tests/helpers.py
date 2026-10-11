@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import struct
+import time
 from urllib.parse import parse_qs, urlparse
 
 import ha_stubs
@@ -15,11 +16,12 @@ coordinator_mod = importlib.import_module("ascom_alpaca_bridge.coordinator")
 
 
 class _Response:
-    def __init__(self, status=200, payload=None, body=b"", server=None):
+    def __init__(self, status=200, payload=None, body=b"", server=None, dev=None):
         self.status = status
         self._payload = payload
         self._body = body
         self._server = server
+        self._dev = dev
 
     async def json(self):
         return self._payload
@@ -32,12 +34,21 @@ class _Response:
         if server is not None:
             server.inflight += 1
             server.max_inflight = max(server.max_inflight, server.inflight)
-            await asyncio.sleep(0)  # a request takes time: the others can start meanwhile
+            by_device = server.inflight_by_device
+            by_device[self._dev] = by_device.get(self._dev, 0) + 1
+            server.max_inflight_by_device[self._dev] = max(
+                server.max_inflight_by_device.get(self._dev, 0), by_device[self._dev]
+            )
+            # a request takes time: the others can start meanwhile (a slow device: `delay`)
+            await asyncio.sleep(server.delay.get(self._dev, 0))
         return self
 
     async def __aexit__(self, *exc):
-        if self._server is not None:
-            self._server.inflight -= 1
+        server = self._server
+        if server is not None:
+            server.inflight -= 1
+            server.inflight_by_device[self._dev] -= 1
+            server.last_finished[self._dev] = time.monotonic()
         return False
 
 
@@ -60,6 +71,10 @@ class FakeAlpaca:
         self.statuses: dict = {}  # (devtype, number, prop, arg) -> HTTP status instead of the answer
         self.inflight = 0
         self.max_inflight = 0
+        self.inflight_by_device: dict = {}
+        self.max_inflight_by_device: dict = {}
+        self.delay: dict = {}  # device type (lower case) -> seconds every request of it takes
+        self.last_finished: dict = {}  # device type -> time.monotonic() of its last answer
         self.server_name = "Test Server"
         self.configured_devices: list = []  # answer of management/v1/configureddevices
 
@@ -110,12 +125,14 @@ class FakeAlpaca:
             self._fail_once.discard(key)
             raise ClientConnectorError("lost connection")
         if key in self.statuses:
-            return _Response(self.statuses[key], {"ErrorNumber": 1, "ErrorMessage": "http"}, server=self)
+            return _Response(self.statuses[key], {"ErrorNumber": 1, "ErrorMessage": "http"}, server=self, dev=devtype)
         if prop == "imagearray":
-            return _Response(200, body=self.image or b"", server=self)
+            return _Response(200, body=self.image or b"", server=self, dev=devtype)
         if key in self.values:
-            return _Response(200, {"Value": self.values[key], "ErrorNumber": 0, "ErrorMessage": ""}, server=self)
-        return _Response(200, {"ErrorNumber": 1024, "ErrorMessage": "not implemented"}, server=self)
+            return _Response(
+                200, {"Value": self.values[key], "ErrorNumber": 0, "ErrorMessage": ""}, server=self, dev=devtype
+            )
+        return _Response(200, {"ErrorNumber": 1024, "ErrorMessage": "not implemented"}, server=self, dev=devtype)
 
     def put(self, url, data=None, timeout=None):
         devtype, number, command, _ = self._split(url)

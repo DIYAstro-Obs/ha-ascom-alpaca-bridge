@@ -1,6 +1,7 @@
 """Load, log noise, follow-up polls and device identity of the coordinator (review stage 2: B2, B4, B6)."""
 import importlib
 import logging
+import time
 
 import pytest
 
@@ -11,7 +12,7 @@ const = importlib.import_module("ascom_alpaca_bridge.const")
 cover_mod = importlib.import_module("ascom_alpaca_bridge.cover")
 
 
-def test_the_requests_of_one_poll_do_not_all_run_at_once():
+def test_a_device_gets_a_limited_number_of_requests_at_the_same_time():
     alpaca = FakeAlpaca()
     devices = [device("ObservingConditions"), device("Telescope"), device("Camera")]
     coordinator = make_coordinator(alpaca, devices)
@@ -19,7 +20,24 @@ def test_the_requests_of_one_poll_do_not_all_run_at_once():
     run(coordinator.async_refresh())
 
     assert len(alpaca.requests) > 60  # a poll of these three devices is a lot of requests
-    assert 1 < alpaca.max_inflight <= const.MAX_CONCURRENT_REQUESTS
+    for dev_type in ("observingconditions", "telescope", "camera"):
+        assert 1 < alpaca.max_inflight_by_device[dev_type] <= const.MAX_CONCURRENT_REQUESTS
+
+
+def test_a_slow_device_does_not_delay_the_others():
+    """A hanging driver used to take the places of the others (one limit for all): now only its own."""
+    alpaca = FakeAlpaca()
+    alpaca.delay = {"telescope": 0.1}  # 31 requests, 4 at a time: about 0.8 s
+    devices = [device("Telescope"), device("Dome"), device("ObservingConditions"), device("SafetyMonitor")]
+    coordinator = make_coordinator(alpaca, devices)
+    started = time.monotonic()
+
+    run(coordinator.async_refresh())
+
+    finished = {dev: alpaca.last_finished[dev] - started for dev in ("telescope", "dome", "observingconditions", "safetymonitor")}
+    assert finished["telescope"] > 0.6
+    for dev in ("dome", "observingconditions", "safetymonitor"):
+        assert finished[dev] < 0.4, finished
 
 
 def test_the_polling_interval_is_not_faster_than_the_minimum():

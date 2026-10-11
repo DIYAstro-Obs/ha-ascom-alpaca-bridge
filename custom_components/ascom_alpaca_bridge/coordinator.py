@@ -65,8 +65,8 @@ class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
         self._client_transaction_id = 1
         self.max_sensor_age = max_sensor_age
 
-        # Requests that run at the same time during a poll (created per poll, in the running loop)
-        self._semaphore: "asyncio.Semaphore | None" = None
+        # Requests of a device that run at the same time during a poll (created per poll, in the running loop)
+        self._semaphores: Dict[str, asyncio.Semaphore] = {}
         # The poll that follows a command (a new command replaces it)
         self._smart_poll_task = None
         # Properties already reported as HTTP 400 / 404 (one warning, not one per poll)
@@ -125,7 +125,10 @@ class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
         """Update data via HTTP."""
         self._responses = 0
         self._failures = 0
-        self._semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+        self._semaphores = {
+            f"{device['DeviceType'].lower()}_{device['DeviceNumber']}": asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+            for device in self.devices
+        }
         session = async_get_clientsession(self.hass)
         data: Dict[str, Dict[str, Any]] = {}
         tasks = []
@@ -193,8 +196,8 @@ class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
                 ]:
                     tasks.append(self._fetch_prop_task(session, data, dev_key, dev_type, dev_num, p))
 
-        # Every request has its own 10 s timeout and a slow driver only costs its own values; this is the limit of
-        # the whole poll (up to ~100 requests, MAX_CONCURRENT_REQUESTS at a time).
+        # Every request has its own 10 s timeout and a device that hangs only delays its own values (the limit
+        # of requests at the same time is per device); this is the limit of the whole poll.
         try:
             async with asyncio.timeout(60):
                 if tasks:
@@ -395,8 +398,9 @@ class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
 
         warned_key = (dev_type.lower(), dev_num, prop.split("?")[0])
         try:
-            # at most MAX_CONCURRENT_REQUESTS at the same time during a poll
-            async with self._semaphore or contextlib.nullcontext():
+            # at most MAX_CONCURRENT_REQUESTS of a device at the same time
+            semaphore = self._semaphores.get(f"{dev_type.lower()}_{dev_num}")
+            async with semaphore or contextlib.nullcontext():
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                     self._responses += 1
                     if response.status == 200:

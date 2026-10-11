@@ -13,8 +13,9 @@ DEFAULT_SCAN_INTERVAL = 10
 MIN_SCAN_INTERVAL = 5  # a poll is up to ~100 requests (camera, telescope, ...): not faster than every 5 s
 MAX_SCAN_INTERVAL = 120
 
-# Requests of one poll that run at the same time (many ASCOM drivers are serial)
-MAX_CONCURRENT_REQUESTS = 8
+# Requests of one device that run at the same time (many ASCOM drivers are serial). The limit is per device:
+# a driver that hangs only delays its own values, not those of the other devices.
+MAX_CONCURRENT_REQUESTS = 4
 
 CONF_MAX_SENSOR_AGE = "max_sensor_age"
 DEFAULT_MAX_SENSOR_AGE = 600
