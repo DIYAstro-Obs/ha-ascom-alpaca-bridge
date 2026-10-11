@@ -293,7 +293,10 @@ def run_retry(ha: Ha, server: str = None):
         return report.finish()
 
     # the request returns when the setup attempt is over; a client that gives up cancels the setup (setup_error)
+    reload_started = time.time()
     status, _ = ha.request("POST", f"/api/config/config_entries/entry/{entry_id}/reload", timeout=240)
+    reload_took = time.time() - reload_started
+    report.add("retry", "the reload without a server answers quickly (reachability probe)", reload_took < 30, f"{reload_took:.1f} s")
     retrying = wait_for(lambda: entry_state(ha, entry_id) == "setup_retry", 90, 2)
     report.add("retry", "reload without a server gives setup_retry", bool(retrying), f"state {entry_state(ha, entry_id)}")
 
@@ -303,8 +306,11 @@ def run_retry(ha: Ha, server: str = None):
     if not up:
         return report.finish()
     came_back = time.time()
-    loaded = wait_for(lambda: entry_state(ha, entry_id) == "loaded", 600, 5)
-    report.add("retry", "the entry loads by itself", bool(loaded), f"after {time.time() - came_back:.0f} s")
+    loaded = wait_for(lambda: entry_state(ha, entry_id) == "loaded", 600, 2)
+    took = time.time() - came_back
+    # the time is reported, not asserted: Home Assistant retries at most every 80 s, but the duration was 218 s,
+    # 227 s and 2.5 s in three rounds (the cause of the slow ones is not established)
+    report.add("retry", "the entry loads by itself", bool(loaded), f"after {took:.0f} s")
     time.sleep(15)
     after = ha.entry_entities(title)
     report.add("retry", "all entities are there again", after == before, f"{len(before)} -> {len(after)}")
