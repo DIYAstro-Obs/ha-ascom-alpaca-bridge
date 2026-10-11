@@ -185,7 +185,7 @@ class AlpacaDataUpdateCoordinator(DataUpdateCoordinator):
                 for p in [
                     "camerastate", "ccdtemperature", "coolerpower", "percentcompleted",
                     "electronsperadu", "fullwellcapacity", "maxadu", "pixelsizex", "pixelsizey",
-                    "imageready", "ispulseguiding", "cooleron", "fastreadout", "sensorname", "sensortype",
+                    "imageready", "lastexposurestarttime", "ispulseguiding", "cooleron", "fastreadout", "sensorname", "sensortype",
                     "gain", "offset", "binx", "biny", "readoutmode", "numx", "numy", "startx", "starty",
                     "heatsinktemperature", "setccdtemperature",
                     "maxbinx", "maxbiny", "gainmax", "gainmin", "offsetmax", "offsetmin", "exposuremax", "exposuremin",

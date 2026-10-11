@@ -90,9 +90,11 @@ class AlpacaCamera(AlpacaEntity, Camera):
         self._attr_unique_id = f"{super().unique_id}_camera"
         self._attr_is_streaming = False
 
-        # The last image and whether it is the one of the exposure that is ready now
+        # The last image, whether it is the one of the exposure that is ready now, and the start time of that
+        # exposure (LastExposureStartTime), which tells a new exposure even when nobody saw "not ready"
         self._last_image_data = None
         self._image_fetched = False
+        self._image_key = None
 
     @property
     def brand(self) -> str | None:
@@ -104,17 +106,28 @@ class AlpacaCamera(AlpacaEntity, Camera):
         """Return the camera model."""
         return self.coordinator.data.get(self.dev_key, {}).get("sensorname") or "ASCOM Camera"
 
+    def _handle_coordinator_update(self) -> None:
+        """A poll that finds the camera not ready: the image that becomes ready next is a new one, also when
+        nobody asked for the picture during the exposure."""
+        if not self.coordinator.data.get(self.dev_key, {}).get("imageready"):
+            self._image_fetched = False
+        super()._handle_coordinator_update()
+
     async def async_camera_image(self, width: int | None = None, height: int | None = None) -> bytes | None:
         """Return bytes of camera image."""
-        imageready = self.coordinator.data.get(self.dev_key, {}).get("imageready")
+        data = self.coordinator.data.get(self.dev_key, {})
+        imageready = data.get("imageready")
+        exposure = data.get("lastexposurestarttime")
 
         if not imageready:
             # An exposure is running (or nothing is known): the image that becomes ready next is a new one.
             self._image_fetched = False
             return await self._scaled(self._last_image_data, width, height)
 
-        # ImageReady stays true until the next exposure: download once per exposure
-        if not self._image_fetched or self._last_image_data is None:
+        # ImageReady stays true until the next exposure: download once per exposure. The start time of the
+        # exposure tells a new one when the poll did not see the camera busy (short exposures).
+        new_exposure = exposure is not None and exposure != self._image_key
+        if not self._image_fetched or self._last_image_data is None or new_exposure:
             raw_data = await self._download()
             if raw_data is None:
                 return None
@@ -123,6 +136,7 @@ class AlpacaCamera(AlpacaEntity, Camera):
                 return await self._scaled(self._last_image_data, width, height)
             self._last_image_data = jpeg
             self._image_fetched = True
+            self._image_key = exposure
 
         return await self._scaled(self._last_image_data, width, height)
 

@@ -53,3 +53,4 @@ deploy.ps1.local
 secrets.env
 *.secret
 *.secrets
+tests/.live_check_state.json
