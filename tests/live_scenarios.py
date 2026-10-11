@@ -211,6 +211,47 @@ def readonly_scenarios(ha, entities, report):
         report.add("read", f"{title} entities have values", bool(found) and not bad, f"{len(found)} entities")
 
 
+def switch_scenarios(ha, entities, report, words=("omnisim_switch",)):
+    """Boolean switches are turned on and off, analog ones (numbers) are set and read back; read-only values
+    have a value. Everything is put back."""
+    print("Switch device:")
+    mine = [e for e in entities if all(w in e for w in words)]
+    switches = [e for e in mine if e.startswith("switch.")]
+    numbers = [e for e in mine if e.startswith("number.")]
+    read_only = [e for e in mine if e.startswith(("sensor.", "binary_sensor."))]
+    report.add(
+        "switch", "writable and read-only switches are separate entities",
+        bool(switches) and bool(numbers) and bool(read_only),
+        f"{len(switches)} switches, {len(numbers)} analog, {len(read_only)} read only",
+    )
+    for entity in switches:
+        original = ha.value(entity)
+        other, service = ("off", "turn_off") if original == "on" else ("on", "turn_on")
+        back = "turn_on" if original == "on" else "turn_off"
+        try:
+            ha.service("switch", service, entity_id=entity)
+            changed = ha.wait(lambda e=entity, o=other: ha.value(e) == o, 40, 1)
+            report.add("switch", f"{entity.split('.')[1]} turns {other}", bool(changed), f"was {original}, now {ha.value(entity)}")
+        finally:
+            ha.service("switch", back, entity_id=entity)
+            ha.wait(lambda e=entity, o=original: ha.value(e) == o, 40, 1)
+        report.add("switch", f"{entity.split('.')[1]} is back to {original}", ha.value(entity) == original, ha.value(entity))
+    for entity in numbers:
+        original = number(ha, entity)
+        low = attr(ha, entity, "min")
+        high = attr(ha, entity, "max")
+        value = (float(low) + float(high)) / 2 if original != (float(low) + float(high)) / 2 else float(low)
+        try:
+            ha.service("number", "set_value", entity_id=entity, value=value)
+            changed = ha.wait(lambda e=entity, v=value: abs(number(ha, e) - v) < 0.51, 40, 1)
+            report.add("switch", f"{entity.split('.')[1]} is set to {value:g}", bool(changed), f"read back {ha.value(entity)}")
+        finally:
+            ha.service("number", "set_value", entity_id=entity, value=original)
+            ha.wait(lambda e=entity, o=original: abs(number(ha, e) - o) < 0.51, 40, 1)
+    bad = [e for e in read_only if ha.value(e) in ("unavailable", "unknown", None)]
+    report.add("switch", "read-only values are there", not bad, str(bad[:3]))
+
+
 def service_scenarios(ha, entities, report):
     print("Services:")
     status, services = ha.request("GET", "/api/services")
@@ -308,5 +349,6 @@ def run_all(ha, title, entities, report, server=None):
     camera_scenarios(ha, title, report)
     camera_picture_scenario(ha, entities, report, server)
     readonly_scenarios(ha, entities, report)
+    switch_scenarios(ha, entities, report)
     service_scenarios(ha, entities, report)
     reload_scenario(ha, title, report)
